@@ -17,9 +17,14 @@ from PyQt5.QtWidgets import (
     QGraphicsDropShadowEffect,
     QRadioButton,
     QButtonGroup,
+    QScrollArea,
+    QGridLayout,
+    QDialog,
+    QCheckBox,
+    QSpinBox,
 )
-from PyQt5.QtCore import Qt, QThread, pyqtSignal, QDir
-from PyQt5.QtGui import QIcon, QFont, QFontDatabase, QPalette, QColor
+from PyQt5.QtCore import Qt, QThread, pyqtSignal, QDir, QSettings
+from PyQt5.QtGui import QIcon, QFont, QFontDatabase, QPalette, QColor, QPixmap, QImage
 import qtawesome as qta  # For better icons, install with: pip install qtawesome
 from pathlib import Path
 from ..core.pdf_processor import extract_images_from_pdf
@@ -29,7 +34,10 @@ from . import resources_rc  # Change this line
 from pptx import Presentation
 from pptx.util import Inches
 import fitz
-from ..util.image_handler import save_image, extract_to_ppt
+from ..util.image_handler import save_image, extract_to_ppt, ImageExtractionThread
+import io
+from PIL import Image
+import os
 
 
 class ExtractionWorker(QThread):
@@ -110,468 +118,366 @@ class ExtractionWorker(QThread):
         self._is_running = False
 
 
+class ImagePreviewLabel(QLabel):
+    def __init__(self, image_bytes, index):
+        super().__init__()
+        self.image_bytes = image_bytes
+        self.index = index
+        self.is_inverted = False
+        self.setFixedSize(200, 200)
+        self.setAlignment(Qt.AlignCenter)
+        self.setStyleSheet("border: 2px solid gray; margin: 2px;")
+        self.setScaledContents(True)
+        self.update_image()
+        self.setCursor(Qt.PointingHandCursor)
+        self.setToolTip("انقر للقلب")
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self.is_inverted = not self.is_inverted
+            self.update_image()
+            self.setStyleSheet(
+                f"border: 2px solid {'red' if self.is_inverted else 'gray'}; margin: 2px;"
+            )
+
+    def update_image(self):
+        img = Image.open(io.BytesIO(self.image_bytes))
+        if self.is_inverted:
+            # Invert the image
+            if img.mode != "RGB":
+                img = img.convert("RGB")
+            img = Image.eval(img, lambda x: 255 - x)
+
+        # Convert PIL image to QPixmap
+        img_byte_arr = io.BytesIO()
+        img.save(img_byte_arr, format="PNG")
+        img_byte_arr = img_byte_arr.getvalue()
+
+        image = QImage.fromData(img_byte_arr)
+        pixmap = QPixmap.fromImage(image)
+        self.setPixmap(
+            pixmap.scaled(200, 200, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        )
+
+
+class PreviewDialog(QDialog):
+    def __init__(self, images, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("معاينة الصور")
+        self.setMinimumSize(800, 600)
+
+        layout = QVBoxLayout(self)
+
+        # Instructions and buttons layout
+        top_layout = QHBoxLayout()
+
+        # Instructions label
+        instructions = QLabel("انقر على الصور السالبة لقلبها")
+        instructions.setAlignment(Qt.AlignCenter)
+        top_layout.addWidget(instructions)
+
+        # Convert All button
+        self.convert_all_btn = QPushButton("قلب جميع الصور")
+        self.convert_all_btn.setCheckable(True)  # Make button toggleable
+        self.convert_all_btn.clicked.connect(self.toggle_all_images)
+        top_layout.addWidget(self.convert_all_btn)
+
+        layout.addLayout(top_layout)
+
+        # Scroll area for images
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll_widget = QWidget()
+        self.grid_layout = QGridLayout(scroll_widget)
+        scroll.setWidget(scroll_widget)
+        layout.addWidget(scroll)
+
+        # Buttons
+        button_layout = QHBoxLayout()
+        self.ok_button = QPushButton("موافق")
+        self.cancel_button = QPushButton("إلغاء")
+        button_layout.addWidget(self.ok_button)
+        button_layout.addWidget(self.cancel_button)
+        layout.addLayout(button_layout)
+
+        # Connect buttons
+        self.ok_button.clicked.connect(self.accept)
+        self.cancel_button.clicked.connect(self.reject)
+
+        # Show images
+        self.preview_labels = []
+        self.show_previews(images)
+
+        # Track the state of all images
+        self.all_converted = False
+
+    def toggle_all_images(self):
+        self.all_converted = not self.all_converted
+
+        if self.all_converted:
+            # Convert all images
+            self.convert_all_btn.setText("إلغاء قلب الصور")
+            for label in self.preview_labels:
+                label.is_inverted = True
+                label.update_image()
+                label.setStyleSheet("border: 2px solid red; margin: 2px;")
+        else:
+            # Revert all images
+            self.convert_all_btn.setText("قلب جميع الصور")
+            for label in self.preview_labels:
+                label.is_inverted = False
+                label.update_image()
+                label.setStyleSheet("border: 2px solid gray; margin: 2px;")
+
+    def show_previews(self, images):
+        cols = 4
+        for i, image_bytes in enumerate(images):
+            try:
+                row = i // cols
+                col = i % cols
+                label = ImagePreviewLabel(image_bytes, i)
+                self.grid_layout.addWidget(label, row, col)
+                self.preview_labels.append(label)
+            except Exception as e:
+                print(f"Error creating preview for image {i}: {str(e)}")
+
+    def get_inverted_indices(self):
+        return [label.is_inverted for label in self.preview_labels]
+
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.settings = Settings()
-        self.current_language = self.settings.get_language()
+        self.setWindowTitle("PDF Image Extractor")
+        self.setMinimumWidth(400)
 
-        # Initialize font
-        self.init_font()
-
-        # Setup window properties
-        self.setWindowTitle("تطبيق الدكتور وليد")
-        self.setMinimumSize(1024, 768)
-
-        # Fix window icon - explicit path
-        self.setWindowIcon(QIcon(":/icons/logo.png"))
-
-        # Force RTL for title bar
-        self.setLayoutDirection(Qt.RightToLeft)
-        self.setWindowFlags(self.windowFlags() | Qt.WindowMinMaxButtonsHint)
-
-        # Set window style with lighter, more transparent gradient
-        self.setStyleSheet(
-            """
-            QMainWindow {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                    stop:0 rgba(100, 181, 246, 180),  /* Light blue */
-                    stop:0.5 rgba(30, 136, 229, 160), /* Medium blue */
-                    stop:1 rgba(21, 101, 192, 140)    /* Darker blue */
-                );
-            }
-            QFrame#mainFrame {
-                background: rgba(255, 255, 255, 245);
-                border-radius: 20px;
-                border: 1px solid rgba(255, 255, 255, 0.5);
-            }
-            QLabel#titleLabel {
-                color: #1976D2;
-                background: rgba(255, 255, 255, 0.3);
-                border-radius: 15px;
-            }
-        """
+        # Initialize settings
+        self.settings = QSettings("PDFExtractor", "ImageExtractor")
+        self.last_directory = self.settings.value(
+            "last_directory", os.path.expanduser("~")
         )
 
-        # Initialize variables
-        self.pdf_path = None
-        self.output_dir = None
-
-        # Set up the UI
-        self.setup_ui()
-
-    def init_font(self):
-        """Initialize and load the Arabic font"""
-        # Print available fonts for debugging
-        print("Available fonts:", QFontDatabase().families())
-
-        # Load the custom font
-        font_id = QFontDatabase.addApplicationFont(":/fonts/Cairo-Regular.ttf")
-        if font_id != -1:
-            print("Font loaded successfully")
-            font_family = QFontDatabase.applicationFontFamilies(font_id)[0]
-            print("Font family:", font_family)
-            self.font = QFont(font_family, 12)
-        else:
-            print("Error loading font, using system Arabic font")
-            self.font = QFont("Arial", 12)
-
-        # Set the font
-        self.setFont(self.font)
-
-    def setup_ui(self):
-        # Create central widget with main frame
+        # Create central widget and layout
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
-        main_layout = QVBoxLayout(central_widget)
-        main_layout.setContentsMargins(40, 40, 40, 40)
+        layout = QVBoxLayout(central_widget)
 
-        # Create main frame with shadow effect
-        main_frame = QFrame()
-        main_frame.setObjectName("mainFrame")
+        # File selection
+        file_layout = QHBoxLayout()
+        self.file_label = QLabel("لم يتم اختيار ملف")
+        self.browse_button = QPushButton("اختر ملف PDF")
+        self.browse_button.clicked.connect(self.browse_file)
+        file_layout.addWidget(self.file_label)
+        file_layout.addWidget(self.browse_button)
+        layout.addLayout(file_layout)
 
-        # Add drop shadow effect
-        shadow = QGraphicsDropShadowEffect()
-        shadow.setBlurRadius(20)
-        shadow.setColor(QColor(0, 0, 0, 80))
-        shadow.setOffset(0, 0)
-        main_frame.setGraphicsEffect(shadow)
+        # Page range selection
+        page_range_layout = QHBoxLayout()
+        self.page_range_check = QCheckBox("تحديد نطاق الصفحات")
+        self.page_range_check.stateChanged.connect(self.toggle_page_range)
+        page_range_layout.addWidget(self.page_range_check)
 
-        frame_layout = QVBoxLayout(main_frame)
-        frame_layout.setSpacing(30)
-        frame_layout.setContentsMargins(40, 40, 40, 40)
-        main_layout.addWidget(main_frame)
+        self.start_page_label = QLabel("من صفحة:")
+        self.start_page_spin = QSpinBox()
+        self.start_page_spin.setMinimum(1)
+        self.start_page_spin.setEnabled(False)
 
-        # Title with updated style
-        title = QLabel("تطبيق استخراج الصور من ملفات PDF")
-        title.setObjectName("titleLabel")
-        title.setFont(QFont(self.font.family(), 32, QFont.Bold))
-        title.setStyleSheet(
-            """
-            padding: 20px;
-            background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                stop:0 rgba(255, 255, 255, 0.3), 
-                stop:0.5 rgba(255, 255, 255, 0.4), 
-                stop:1 rgba(255, 255, 255, 0.3));
-            border-radius: 15px;
-            color: #1976D2;
-            border: 1px solid rgba(255, 255, 255, 0.5);
-        """
-        )
-        title.setAlignment(Qt.AlignCenter)
-        frame_layout.addWidget(title)
+        self.end_page_label = QLabel("إلى صفحة:")
+        self.end_page_spin = QSpinBox()
+        self.end_page_spin.setMinimum(1)
+        self.end_page_spin.setEnabled(False)
 
-        # PDF Selection with glass effect
-        pdf_layout = QHBoxLayout()
-        self.pdf_label = QLabel("لم يتم اختيار ملف PDF")
-        self.pdf_label.setStyleSheet(
-            """
-            padding: 15px;
-            background: rgba(255, 255, 255, 0.8);
-            border-radius: 12px;
-            border: 2px solid rgba(25, 118, 210, 0.2);
-            font-size: 16px;
-            color: #1976D2;
-        """
-        )
+        page_range_layout.addWidget(self.start_page_label)
+        page_range_layout.addWidget(self.start_page_spin)
+        page_range_layout.addWidget(self.end_page_label)
+        page_range_layout.addWidget(self.end_page_spin)
+        page_range_layout.addStretch()
+        layout.addLayout(page_range_layout)
 
-        pdf_button = QPushButton("  اختيار ملف PDF")
-        pdf_button.setIcon(qta.icon("fa5s.file-pdf", color="#1a237e", scale_factor=1.5))
-        pdf_button.setIconSize(pdf_button.iconSize() * 2)
-        pdf_button.setStyleSheet(self.get_button_style())
-        pdf_button.setMinimumHeight(50)
-        pdf_button.clicked.connect(self.select_pdf)
+        # Preview button
+        self.preview_button = QPushButton("معاينة")
+        self.preview_button.clicked.connect(self.start_preview)
+        self.preview_button.setEnabled(False)
+        layout.addWidget(self.preview_button)
 
-        # Add hover effect
-        pdf_button.setAutoFillBackground(True)
-        pdf_button.enterEvent = lambda e: self.button_hover_effect(pdf_button, True)
-        pdf_button.leaveEvent = lambda e: self.button_hover_effect(pdf_button, False)
-
-        pdf_layout.addWidget(self.pdf_label, stretch=1)
-        pdf_layout.addWidget(pdf_button)
-        frame_layout.addLayout(pdf_layout)
-
-        # Output Directory Selection
+        # Output type selection
         output_layout = QHBoxLayout()
-        self.output_label = QLabel("لم يتم اختيار مجلد الحفظ")
-        self.output_label.setStyleSheet(
-            """
-            padding: 15px;
-            background: rgba(255, 255, 255, 0.8);
-            border-radius: 12px;
-            border: 2px solid rgba(25, 118, 210, 0.2);
-            font-size: 16px;
-            color: #1976D2;
-        """
-        )
+        self.output_group = QButtonGroup()
 
-        output_button = QPushButton("  اختيار مجلد الحفظ")
-        output_button.setIcon(
-            qta.icon("fa5s.folder-open", color="#1a237e", scale_factor=1.5)
-        )
-        output_button.setIconSize(output_button.iconSize() * 2)
-        output_button.setStyleSheet(self.get_button_style())
-        output_button.setMinimumHeight(50)
-        output_button.clicked.connect(self.select_output)
-
-        # Add hover effect
-        output_button.enterEvent = lambda e: self.button_hover_effect(
-            output_button, True
-        )
-        output_button.leaveEvent = lambda e: self.button_hover_effect(
-            output_button, False
-        )
-
-        output_layout.addWidget(self.output_label, stretch=1)
-        output_layout.addWidget(output_button)
-        frame_layout.addLayout(output_layout)
-
-        # Add Radio Buttons for Inversion Option
-        inversion_group = QButtonGroup(self)
-        inversion_layout = QHBoxLayout()
-
-        self.normal_radio = QRadioButton("صور عادية")
-        self.inverted_radio = QRadioButton("صور معكوسة")
-        self.normal_radio.setChecked(True)  # Default to normal
-
-        for radio in [self.normal_radio, self.inverted_radio]:
-            radio.setStyleSheet(
-                """
-                QRadioButton {
-                    font-size: 16px;
-                    color: #1976D2;
-                    padding: 10px;
-                }
-                QRadioButton::indicator {
-                    width: 20px;
-                    height: 20px;
-                }
-            """
-            )
-            inversion_group.addButton(radio)
-            inversion_layout.addWidget(radio)
-
-        frame_layout.addLayout(inversion_layout)
-
-        # Add Radio Buttons for Export Option
-        export_group = QButtonGroup(self)
-        export_layout = QHBoxLayout()
-
-        self.files_radio = QRadioButton("حفظ كملفات")
         self.ppt_radio = QRadioButton("حفظ كعرض تقديمي")
-        self.files_radio.setChecked(True)  # Default to files
+        self.ppt_radio.setChecked(True)
+        self.images_radio = QRadioButton("حفظ كصور منفصلة")
 
-        for radio in [self.files_radio, self.ppt_radio]:
-            radio.setStyleSheet(
-                """
-                QRadioButton {
-                    font-size: 16px;
-                    color: #1976D2;
-                    padding: 10px;
-                }
-                QRadioButton::indicator {
-                    width: 20px;
-                    height: 20px;
-                }
-            """
-            )
-            export_group.addButton(radio)
-            export_layout.addWidget(radio)
+        self.output_group.addButton(self.ppt_radio)
+        self.output_group.addButton(self.images_radio)
 
-        frame_layout.addLayout(export_layout)
+        output_layout.addWidget(self.ppt_radio)
+        output_layout.addWidget(self.images_radio)
+        layout.addLayout(output_layout)
 
-        # Progress Bar and Status Label
-        self.progress_bar = QProgressBar()
-        self.progress_bar.setTextVisible(True)
-        self.progress_bar.setStyleSheet(
-            """
-            QProgressBar {
-                border: 2px solid rgba(25, 118, 210, 0.2);
-                border-radius: 15px;
-                text-align: center;
-                background: rgba(255, 255, 255, 0.8);
-                height: 30px;
-            }
-            QProgressBar::chunk {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                    stop:0 #2196F3, stop:1 #1976D2);
-                border-radius: 13px;
-            }
-        """
-        )
-        frame_layout.addWidget(self.progress_bar)
-
-        # Status Label
-        self.status_label = QLabel("جاهز")
-        self.status_label.setAlignment(Qt.AlignCenter)
-        self.status_label.setStyleSheet(
-            """
-            color: #1976D2;
-            font-size: 18px;
-            padding: 10px;
-            background: rgba(255, 255, 255, 0.8);
-            border-radius: 10px;
-            border: 1px solid rgba(25, 118, 210, 0.2);
-        """
-        )
-        frame_layout.addWidget(self.status_label)
-
-        # Buttons Layout
-        buttons_layout = QHBoxLayout()
-
-        # Extract Button
+        # Extract button
         self.extract_button = QPushButton("استخراج الصور")
-        self.extract_button.setIcon(
-            qta.icon("fa5s.images", color="white", scale_factor=1.5)
-        )
-        self.extract_button.setStyleSheet(self.get_button_style(primary=True))
         self.extract_button.clicked.connect(self.start_extraction)
         self.extract_button.setEnabled(False)
-        buttons_layout.addWidget(self.extract_button)
+        layout.addWidget(self.extract_button)
 
-        # Stop Button
-        self.stop_button = QPushButton("إيقاف")
-        self.stop_button.setIcon(qta.icon("fa5s.stop", color="white", scale_factor=1.5))
-        self.stop_button.setStyleSheet(self.get_button_style(warning=True))
-        self.stop_button.clicked.connect(self.stop_extraction)
-        self.stop_button.setEnabled(False)
-        buttons_layout.addWidget(self.stop_button)
+        # Progress bar
+        self.progress_bar = QProgressBar()
+        layout.addWidget(self.progress_bar)
 
-        frame_layout.addLayout(buttons_layout)
+        # Status label
+        self.status_label = QLabel()
+        self.status_label.setAlignment(Qt.AlignCenter)
+        layout.addWidget(self.status_label)
 
-        # Add stretching space
-        frame_layout.addStretch()
+        # Add output directory selection
+        output_dir_layout = QHBoxLayout()
+        self.output_dir_label = QLabel("مجلد الحفظ:")
+        self.output_dir_path = QLabel("المستندات")
+        self.output_dir_button = QPushButton("اختر المجلد")
+        self.output_dir_button.clicked.connect(self.select_output_dir)
 
-    def setup_menubar(self):
-        menubar = self.menuBar()
+        output_dir_layout.addWidget(self.output_dir_label)
+        output_dir_layout.addWidget(self.output_dir_path)
+        output_dir_layout.addWidget(self.output_dir_button)
+        layout.addLayout(output_dir_layout)
 
-        # File Menu
-        file_menu = menubar.addMenu(Translations.get("file", self.current_language))
+        # Initialize output directory to Documents folder
+        self.output_dir = os.path.join(os.path.expanduser("~"), "Documents")
 
-        # Settings Action
-        settings_action = QAction(
-            QIcon(":/icons/settings_icon.png"),
-            Translations.get("settings", self.current_language),
-            self,
-        )
-        settings_action.triggered.connect(self.show_settings)
-        file_menu.addAction(settings_action)
+        self.pdf_path = None
+        self.extraction_thread = None
+        self.preview_images = []
+        self.inverted_indices = []
 
-        # About Action
-        about_action = QAction(Translations.get("about", self.current_language), self)
-        about_action.triggered.connect(self.show_about)
-        file_menu.addAction(about_action)
-
-    def show_settings(self):
-        from .settings_dialog import SettingsDialog
-
-        dialog = SettingsDialog(self)
-        if dialog.exec_():
-            self.reload_ui()
-
-    def show_about(self):
-        QMessageBox.about(
-            self,
-            Translations.get("about", self.current_language),
-            "Dr. Waleed's PDF Image Extractor\nVersion 1.0",
+    def browse_file(self):
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "اختر ملف PDF", self.last_directory, "PDF files (*.pdf)"
         )
 
-    def reload_ui(self):
-        self.current_language = self.settings.get_language()
-        font = QFont(self.font.family(), self.settings.get_font_size())
-        self.setFont(font)
-        self.retranslate_ui()
+        if file_path:
+            # Save the new directory
+            self.last_directory = os.path.dirname(file_path)
+            self.settings.setValue("last_directory", self.last_directory)
 
-    def retranslate_ui(self):
-        # Update all text elements with new language
-        self.setWindowTitle(Translations.get("app_title", self.current_language))
-        # ... update other UI elements
+            self.pdf_path = file_path
+            self.file_label.setText(os.path.basename(file_path))
 
-    def get_button_style(self, primary=False, warning=False, hover=False):
-        """Get button style with hover effect"""
-        if primary:
-            base_color = "#1976D2" if hover else "#2196F3"
-            return f"""
-                QPushButton {{
-                    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                        stop:0 {base_color}, stop:1 #1565C0);
-                    color: white;
-                    border: none;
-                    padding: 15px 30px;
-                    border-radius: 12px;
-                    font-weight: bold;
-                    font-size: 18px;
-                }}
-                QPushButton:disabled {{
-                    background: #BDC3C7;
-                }}
-            """
-        elif warning:
-            base_color = "#c0392b" if hover else "#e74c3c"
-            return f"""
-                QPushButton {{
-                    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                        stop:0 {base_color}, stop:1 #c0392b);
-                    color: white;
-                    border: none;
-                    padding: 15px 30px;
-                    border-radius: 12px;
-                    font-weight: bold;
-                    font-size: 18px;
-                }}
-                QPushButton:disabled {{
-                    background: #BDC3C7;
-                }}
-            """
+            # Update page range spinners with PDF page count
+            try:
+                doc = fitz.open(file_path)
+                page_count = doc.page_count
+                doc.close()
+
+                self.start_page_spin.setMaximum(page_count)
+                self.end_page_spin.setMaximum(page_count)
+                self.end_page_spin.setValue(page_count)
+
+                # Enable preview button
+                self.preview_button.setEnabled(True)
+                self.extract_button.setEnabled(False)
+                self.status_label.setText("اختر نطاق الصفحات ثم اضغط معاينة")
+            except Exception as e:
+                print(f"Error getting page count: {str(e)}")
+
+    def select_output_dir(self):
+        dir_path = QFileDialog.getExistingDirectory(
+            self, "اختر مجلد الحفظ", self.output_dir
+        )
+        if dir_path:
+            self.output_dir = dir_path
+            # Show only the last folder name in the label
+            self.output_dir_path.setText(os.path.basename(dir_path))
+
+    def start_preview(self):
+        self.status_label.setText("جاري استخراج الصور للمعاينة...")
+        self.progress_bar.setValue(0)
+
+        # Get page range
+        start_page = (
+            self.start_page_spin.value() if self.page_range_check.isChecked() else 1
+        )
+        end_page = (
+            self.end_page_spin.value() if self.page_range_check.isChecked() else None
+        )
+
+        # Start extraction thread for preview
+        self.extraction_thread = ImageExtractionThread(
+            pdf_path=self.pdf_path,
+            output_dir=self.output_dir,  # Use selected output directory
+            start_page=start_page,
+            end_page=end_page,
+            options={"preview_only": True},
+        )
+        self.extraction_thread.progress.connect(self.update_progress)
+        self.extraction_thread.finished.connect(self.show_preview_dialog)
+        self.extraction_thread.start()
+
+    def show_preview_dialog(self, result):
+        success, message, images = result
+        if success and images:
+            dialog = PreviewDialog(images, self)
+            if dialog.exec_() == QDialog.Accepted:
+                self.preview_images = images
+                self.inverted_indices = dialog.get_inverted_indices()
+                self.extract_button.setEnabled(True)
+                self.status_label.setText("تم تحديد الصور للاستخراج")
+            else:
+                self.status_label.setText("تم إلغاء المعاينة")
+                self.extract_button.setEnabled(False)
         else:
-            opacity = "0.95" if hover else "0.85"
-            return f"""
-                QPushButton {{
-                    background: rgba(255, 255, 255, {opacity});
-                    border: 2px solid rgba(25, 118, 210, 0.2);
-                    padding: 15px 30px;
-                    border-radius: 12px;
-                    font-size: 16px;
-                    color: #1976D2;
-                }}
-            """
-
-    def select_pdf(self):
-        file_name, _ = QFileDialog.getOpenFileName(
-            self, "اختيار ملف PDF", "", "PDF Files (*.pdf)"
-        )
-        if file_name:
-            self.pdf_path = file_name
-            self.pdf_label.setText(Path(file_name).name)
-            self.update_extract_button()
-
-    def select_output(self):
-        dir_name = QFileDialog.getExistingDirectory(self, "اختيار مجلد الحفظ")
-        if dir_name:
-            self.output_dir = dir_name
-            self.output_label.setText(Path(dir_name).name)
-            self.update_extract_button()
-
-    def update_extract_button(self):
-        self.extract_button.setEnabled(bool(self.pdf_path and self.output_dir))
+            self.status_label.setText(message)
+            self.extract_button.setEnabled(False)
 
     def start_extraction(self):
-        if not self.pdf_path or not self.output_dir:
+        if not self.pdf_path or not self.preview_images:
             return
 
         self.extract_button.setEnabled(False)
-        self.stop_button.setEnabled(True)
-        self.progress_bar.setMaximum(100)
         self.progress_bar.setValue(0)
         self.status_label.setText("جاري استخراج الصور...")
 
-        # Create and start worker thread
-        self.worker = ExtractionWorker(
-            self.pdf_path,
-            self.output_dir,
-            self.inverted_radio.isChecked(),
-            self.ppt_radio.isChecked(),
+        # Get page range
+        start_page = (
+            self.start_page_spin.value() if self.page_range_check.isChecked() else 1
         )
-        self.worker.progress.connect(self.update_progress)
-        self.worker.finished.connect(self.extraction_complete)
-        self.worker.error.connect(self.extraction_error)
-        self.worker.start()
+        end_page = (
+            self.end_page_spin.value() if self.page_range_check.isChecked() else None
+        )
 
-    def stop_extraction(self):
-        if hasattr(self, "worker") and self.worker.isRunning():
-            self.worker.stop()
-            self.worker.wait()
-            self.status_label.setText("تم إيقاف العملية")
-            self.extract_button.setEnabled(True)
-            self.stop_button.setEnabled(False)
+        self.extraction_thread = ImageExtractionThread(
+            pdf_path=self.pdf_path,
+            output_dir=self.output_dir,  # Use selected output directory
+            start_page=start_page,
+            end_page=end_page,
+            options={
+                "output_type": "pptx" if self.ppt_radio.isChecked() else "images",
+                "inverted_indices": self.inverted_indices,
+                "preview_images": self.preview_images,
+            },
+        )
+
+        self.extraction_thread.progress.connect(self.update_progress)
+        self.extraction_thread.finished.connect(self.extraction_complete)
+        self.extraction_thread.start()
 
     def update_progress(self, current, total):
         percentage = (current / total) * 100
         self.progress_bar.setValue(int(percentage))
         self.status_label.setText(f"جاري المعالجة... {current}/{total}")
 
-    def extraction_complete(self, num_images):
-        self.progress_bar.setValue(100)
-        if self.ppt_radio.isChecked():
-            self.status_label.setText(
-                f"تم استخراج {num_images} صورة وفتح ملف العرض التقديمي!"
-            )
-        else:
-            self.status_label.setText(f"تم استخراج {num_images} صورة بنجاح!")
+    def extraction_complete(self, result):
+        success, message, count = result
         self.extract_button.setEnabled(True)
-        self.stop_button.setEnabled(False)
 
-    def extraction_error(self, error_message):
-        self.progress_bar.setValue(0)
-        self.status_label.setText(f"خطأ: {error_message}")
-        self.extract_button.setEnabled(True)
-        self.stop_button.setEnabled(False)
-
-    def button_hover_effect(self, button, hover, primary=False, warning=False):
-        """Add hover effect to buttons"""
-        if primary:
-            button.setStyleSheet(self.get_button_style(primary=True, hover=hover))
-        elif warning:
-            button.setStyleSheet(self.get_button_style(warning=True, hover=hover))
+        if success:
+            self.progress_bar.setValue(100)
+            self.status_label.setText(message)  # Just show the message directly
         else:
-            button.setStyleSheet(self.get_button_style(hover=hover))
+            self.progress_bar.setValue(0)
+            self.status_label.setText(message)  # Error messages already formatted
+
+    def toggle_page_range(self, state):
+        enabled = bool(state)
+        self.start_page_spin.setEnabled(enabled)
+        self.end_page_spin.setEnabled(enabled)

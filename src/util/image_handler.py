@@ -6,6 +6,8 @@ from pptx.util import Inches
 from pptx.dml.color import RGBColor
 import subprocess
 import platform
+import fitz
+from PyQt5.QtCore import QThread, pyqtSignal
 
 
 def invert_image(image_bytes):
@@ -167,3 +169,189 @@ def extract_to_ppt(images, output_dir, should_invert=False):
     except Exception as e:
         print(f"Error creating PowerPoint: {str(e)}")
         raise e
+
+
+class ImageExtractionThread(QThread):
+    progress = pyqtSignal(object)
+    finished = pyqtSignal(tuple)
+
+    def __init__(self, pdf_path, output_dir, start_page, end_page, options):
+        super().__init__()
+        self.pdf_path = pdf_path
+        self.output_dir = output_dir
+        self.start_page = start_page
+        self.end_page = end_page
+        self.options = options if options else {}  # Ensure options is not None
+        self._is_running = True
+
+    def run(self):
+        doc = None
+        try:
+            # Get total page count at the start
+            doc = fitz.open(self.pdf_path)
+            doc_page_count = len(doc)
+
+            if self.options.get("preview_only"):
+                images = []
+
+                # Use specified page range
+                start = self.start_page - 1
+                end = self.end_page if self.end_page else doc_page_count
+
+                for page_num in range(start, end):
+                    if not self._is_running:
+                        break
+
+                    for img in doc.get_page_images(page_num):
+                        try:
+                            xref = img[0]
+                            base_image = doc.extract_image(xref)
+                            if base_image:
+                                images.append(base_image["image"])
+                        except Exception as e:
+                            print(f"Error extracting image: {str(e)}")
+                            continue
+
+                doc.close()
+                doc = None  # Clear the reference
+                self.finished.emit((True, "تم استخراج الصور للمعاينة", images))
+                return
+
+            # For actual extraction, use the preview images
+            images = self.options.get("preview_images", [])
+            inverted_indices = self.options.get("inverted_indices", [])
+
+            if self._is_running and images:
+                if self.options.get("output_type") == "pptx":
+                    # Create PowerPoint with the preview images
+                    prs = Presentation()
+
+                    # Get PDF filename without extension for PowerPoint name
+                    pdf_name = os.path.splitext(os.path.basename(self.pdf_path))[0]
+
+                    # Get page range for filename
+                    page_range = ""
+                    if self.start_page != 1 or (
+                        self.end_page and self.end_page != doc_page_count
+                    ):
+                        page_range = (
+                            f" {self.start_page}-{self.end_page or doc_page_count}"
+                        )
+
+                    for i, image_bytes in enumerate(images):
+                        if not self._is_running:
+                            break
+
+                        slide = prs.slides.add_slide(prs.slide_layouts[6])
+
+                        # Create a new BytesIO object for each image
+                        img_stream = io.BytesIO(image_bytes)
+                        img = Image.open(img_stream)
+
+                        # Apply inversion if needed
+                        if (
+                            inverted_indices
+                            and len(inverted_indices) > i
+                            and inverted_indices[i]
+                        ):
+                            if img.mode != "RGB":
+                                img = img.convert("RGB")
+                            img = Image.eval(img, lambda x: 255 - x)
+
+                        # Save temp image with unique name
+                        temp_path = os.path.join(self.output_dir, f"temp_{i}.png")
+                        img.save(temp_path, "PNG")
+
+                        # Add to slide
+                        slide.shapes.add_picture(
+                            temp_path, 0, 0, prs.slide_width, prs.slide_height
+                        )
+
+                        # Clean up temp file immediately
+                        os.remove(temp_path)
+                        img_stream.close()
+
+                    # Save with PDF name and page range
+                    output_path = os.path.join(
+                        self.output_dir, f"{pdf_name}{page_range}.pptx"
+                    )
+
+                    try:
+                        prs.save(output_path)
+                        if os.path.exists(output_path):
+                            self.open_file(output_path)
+                            self.finished.emit(
+                                (True, f"تم حفظ وفتح {len(images)} صورة", len(images))
+                            )
+                        else:
+                            self.finished.emit((False, "خطأ: فشل حفظ الملف", 0))
+                    except PermissionError:
+                        self.finished.emit((False, "خطأ: الملف مفتوح في برنامج آخر", 0))
+                    except Exception as e:
+                        self.finished.emit((False, "خطأ: فشل حفظ الملف", 0))
+
+                else:
+                    # Save as separate images
+                    pdf_name = os.path.splitext(os.path.basename(self.pdf_path))[0]
+                    page_range = ""
+                    if self.start_page != 1 or (
+                        self.end_page and self.end_page != doc_page_count
+                    ):
+                        page_range = (
+                            f" {self.start_page}-{self.end_page or doc_page_count}"
+                        )
+
+                    saved_count = 0
+                    for i, image_bytes in enumerate(images):
+                        if not self._is_running:
+                            break
+
+                        try:
+                            img = Image.open(io.BytesIO(image_bytes))
+
+                            # Apply inversion if needed
+                            if (
+                                inverted_indices
+                                and len(inverted_indices) > i
+                                and inverted_indices[i]
+                            ):
+                                if img.mode != "RGB":
+                                    img = img.convert("RGB")
+                                img = Image.eval(img, lambda x: 255 - x)
+
+                            output_path = os.path.join(
+                                self.output_dir, f"{pdf_name}{page_range}_{i+1}.png"
+                            )
+                            img.save(output_path, quality=95)
+                            saved_count += 1
+                        except Exception as e:
+                            print(f"Error saving image {i+1}: {str(e)}")
+
+                    if saved_count > 0:
+                        self.finished.emit(
+                            (True, f"تم حفظ {saved_count} صورة", saved_count)
+                        )
+                    else:
+                        self.finished.emit((False, "خطأ: لم يتم حفظ أي صورة", 0))
+
+            else:
+                self.finished.emit((False, "خطأ: لا توجد صور في النطاق المحدد", 0))
+
+        except Exception as e:
+            print(f"Error during extraction: {str(e)}")
+            self.finished.emit((False, "خطأ: فشل المعالجة", 0))
+        finally:
+            if doc:
+                doc.close()
+
+    def open_file(self, filepath):
+        """Open a file with the default system application"""
+        try:
+            if platform.system() == "Windows":
+                os.startfile(filepath)
+            elif platform.system() == "Darwin":  # macOS
+                subprocess.call(("open", filepath))
+            else:  # Linux
+                subprocess.call(("xdg-open", filepath))
+        except Exception as e:
+            print(f"Error opening file: {str(e)}")
