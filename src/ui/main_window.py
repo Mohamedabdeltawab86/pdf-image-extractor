@@ -17,9 +17,21 @@ from PyQt5.QtWidgets import (
     QGraphicsDropShadowEffect,
     QRadioButton,
     QButtonGroup,
+    QTabWidget,
+    QLineEdit,
+    QSpinBox,
+    QCheckBox,
+    QComboBox,
+    QScrollArea,
+    QTextEdit,
+    QSplitter,
+    QToolTip,
+    QListWidget,
+    QGroupBox,
+    QSlider,
 )
-from PyQt5.QtCore import Qt, QThread, pyqtSignal, QDir
-from PyQt5.QtGui import QIcon, QFont, QFontDatabase, QPalette, QColor
+from PyQt5.QtCore import Qt, QThread, pyqtSignal, QDir, QTimer, QSize
+from PyQt5.QtGui import QIcon, QFont, QFontDatabase, QPalette, QColor, QImage, QPixmap
 import qtawesome as qta  # For better icons, install with: pip install qtawesome
 from pathlib import Path
 from ..core.pdf_processor import extract_images_from_pdf
@@ -30,6 +42,9 @@ from pptx import Presentation
 from pptx.util import Inches
 import fitz
 from ..util.image_handler import save_image, extract_to_ppt
+from datetime import datetime
+import os
+from ..util.pdf_tools import PDFTools
 
 
 class ExtractionWorker(QThread):
@@ -114,14 +129,15 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.settings = Settings()
+        self.pdf_tools = PDFTools()
         self.current_language = self.settings.get_language()
 
         # Initialize font
         self.init_font()
 
         # Setup window properties
-        self.setWindowTitle("تطبيق الدكتور وليد")
-        self.setMinimumSize(1024, 768)
+        self.setWindowTitle("تطبيق معالجة ملفات PDF")
+        self.setMinimumSize(1200, 800)
 
         # Fix window icon - explicit path
         self.setWindowIcon(QIcon(":/icons/logo.png"))
@@ -134,21 +150,62 @@ class MainWindow(QMainWindow):
         self.setStyleSheet(
             """
             QMainWindow {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                    stop:0 rgba(100, 181, 246, 180),  /* Light blue */
-                    stop:0.5 rgba(30, 136, 229, 160), /* Medium blue */
-                    stop:1 rgba(21, 101, 192, 140)    /* Darker blue */
-                );
+                background: #f8fafc;
             }
-            QFrame#mainFrame {
-                background: rgba(255, 255, 255, 245);
-                border-radius: 20px;
-                border: 1px solid rgba(255, 255, 255, 0.5);
-            }
-            QLabel#titleLabel {
-                color: #1976D2;
-                background: rgba(255, 255, 255, 0.3);
+            QTabWidget::pane {
+                border: none;
+                background: white;
                 border-radius: 15px;
+                margin: 20px;
+            }
+            QTabBar::tab {
+                padding: 12px 30px;
+                margin: 0px 2px;
+                color: #64748b;
+                border: none;
+                background: #f1f5f9;
+                border-top-left-radius: 8px;
+                border-top-right-radius: 8px;
+            }
+            QTabBar::tab:selected {
+                color: #4F46E5;
+                background: white;
+                font-weight: bold;
+            }
+            QPushButton {
+                background: #4F46E5;
+                color: white;
+                border: none;
+                padding: 12px 25px;
+                border-radius: 8px;
+                font-size: 14px;
+            }
+            QPushButton:hover {
+                background: #4338CA;
+            }
+            QLineEdit {
+                padding: 12px;
+                border: 1px solid #e2e8f0;
+                border-radius: 8px;
+                background: white;
+            }
+            QLabel {
+                color: #1e293b;
+                font-size: 14px;
+            }
+            QSlider::groove:horizontal {
+                border: 1px solid #e2e8f0;
+                height: 8px;
+                background: #f1f5f9;
+                margin: 2px 0;
+                border-radius: 4px;
+            }
+            QSlider::handle:horizontal {
+                background: #4F46E5;
+                border: none;
+                width: 18px;
+                margin: -6px 0;
+                border-radius: 9px;
             }
         """
         )
@@ -183,224 +240,383 @@ class MainWindow(QMainWindow):
         # Create central widget with main frame
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
-        main_layout = QVBoxLayout(central_widget)
-        main_layout.setContentsMargins(40, 40, 40, 40)
+        layout = QVBoxLayout(central_widget)
 
-        # Create main frame with shadow effect
-        main_frame = QFrame()
-        main_frame.setObjectName("mainFrame")
+        # Create tab widget
+        self.tab_widget = QTabWidget()
+        layout.addWidget(self.tab_widget)
 
-        # Add drop shadow effect
-        shadow = QGraphicsDropShadowEffect()
-        shadow.setBlurRadius(20)
-        shadow.setColor(QColor(0, 0, 0, 80))
-        shadow.setOffset(0, 0)
-        main_frame.setGraphicsEffect(shadow)
+        # Add tabs
+        self.tab_widget.addTab(self.create_image_tab(), "استخراج الصور")
+        self.tab_widget.addTab(self.create_bookmark_tab(), "إضافة العناوين")
+        self.tab_widget.addTab(self.create_extract_tab(), "استخراج العناوين")
+        self.tab_widget.addTab(self.create_text_tab(), "استخراج النص")
+        self.tab_widget.addTab(self.create_split_tab(), "تقسيم الملف")
+        self.tab_widget.addTab(self.create_merge_tab(), "دمج الملفات")
 
-        frame_layout = QVBoxLayout(main_frame)
-        frame_layout.setSpacing(30)
-        frame_layout.setContentsMargins(40, 40, 40, 40)
-        main_layout.addWidget(main_frame)
+        # Set RTL layout
+        self.setLayoutDirection(Qt.RightToLeft)
 
-        # Title with updated style
-        title = QLabel("تطبيق استخراج الصور من ملفات PDF")
-        title.setObjectName("titleLabel")
-        title.setFont(QFont(self.font.family(), 32, QFont.Bold))
-        title.setStyleSheet(
-            """
-            padding: 20px;
-            background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                stop:0 rgba(255, 255, 255, 0.3), 
-                stop:0.5 rgba(255, 255, 255, 0.4), 
-                stop:1 rgba(255, 255, 255, 0.3));
-            border-radius: 15px;
-            color: #1976D2;
-            border: 1px solid rgba(255, 255, 255, 0.5);
-        """
-        )
-        title.setAlignment(Qt.AlignCenter)
-        frame_layout.addWidget(title)
+    def create_image_tab(self):
+        widget = QWidget()
 
-        # PDF Selection with glass effect
+        # Create horizontal splitter for preview
+        splitter = QSplitter(Qt.Horizontal)
+
+        # Left side - Controls
+        left_widget = QWidget()
+        layout = QVBoxLayout(left_widget)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(15)
+
+        # PDF selection with preview button
         pdf_layout = QHBoxLayout()
-        self.pdf_label = QLabel("لم يتم اختيار ملف PDF")
-        self.pdf_label.setStyleSheet(
-            """
-            padding: 15px;
-            background: rgba(255, 255, 255, 0.8);
-            border-radius: 12px;
-            border: 2px solid rgba(25, 118, 210, 0.2);
-            font-size: 16px;
-            color: #1976D2;
-        """
+        self.pdf_path_image = QLineEdit()
+        self.pdf_path_image.setPlaceholderText("اختر ملف PDF...")
+        btn_select_pdf = QPushButton(qta.icon("fa5s.file-pdf"), "تصفح")
+        btn_preview = QPushButton(qta.icon("fa5s.eye"), "معاينة")
+        btn_select_pdf.clicked.connect(self.select_pdf_image)
+        btn_preview.clicked.connect(self.update_preview)
+        pdf_layout.addWidget(btn_preview)
+        pdf_layout.addWidget(btn_select_pdf)
+        pdf_layout.addWidget(self.pdf_path_image)
+        layout.addLayout(pdf_layout)
+
+        # Page range with spinboxes and sliders
+        range_frame = QFrame()
+        range_frame.setStyleSheet(
+            "QFrame { background: #f8fafc; border-radius: 8px; padding: 10px; }"
         )
+        range_layout = QVBoxLayout(range_frame)
 
-        pdf_button = QPushButton("  اختيار ملف PDF")
-        pdf_button.setIcon(qta.icon("fa5s.file-pdf", color="#1a237e", scale_factor=1.5))
-        pdf_button.setIconSize(pdf_button.iconSize() * 2)
-        pdf_button.setStyleSheet(self.get_button_style())
-        pdf_button.setMinimumHeight(50)
-        pdf_button.clicked.connect(self.select_pdf)
+        self.all_pages_checkbox = QCheckBox("كل الصفحات")
+        self.all_pages_checkbox.setChecked(True)
+        self.all_pages_checkbox.stateChanged.connect(self.toggle_page_range)
 
-        # Add hover effect
-        pdf_button.setAutoFillBackground(True)
-        pdf_button.enterEvent = lambda e: self.button_hover_effect(pdf_button, True)
-        pdf_button.leaveEvent = lambda e: self.button_hover_effect(pdf_button, False)
+        range_controls = QHBoxLayout()
+        self.page_start_image = QSpinBox()
+        self.page_end_image = QSpinBox()
 
-        pdf_layout.addWidget(self.pdf_label, stretch=1)
-        pdf_layout.addWidget(pdf_button)
-        frame_layout.addLayout(pdf_layout)
+        self.page_start_image.setPrefix("من: ")
+        self.page_end_image.setPrefix("إلى: ")
+        self.page_start_image.setMinimum(1)
+        self.page_end_image.setMinimum(1)
 
-        # Output Directory Selection
-        output_layout = QHBoxLayout()
-        self.output_label = QLabel("لم يتم اختيار مجلد الحفظ")
-        self.output_label.setStyleSheet(
-            """
-            padding: 15px;
-            background: rgba(255, 255, 255, 0.8);
-            border-radius: 12px;
-            border: 2px solid rgba(25, 118, 210, 0.2);
-            font-size: 16px;
-            color: #1976D2;
-        """
+        # Add sliders
+        slider_layout = QHBoxLayout()
+        self.start_slider = QSlider(Qt.Horizontal)
+        self.end_slider = QSlider(Qt.Horizontal)
+
+        # Connect sliders and spinboxes
+        self.start_slider.valueChanged.connect(self.page_start_image.setValue)
+        self.end_slider.valueChanged.connect(self.page_end_image.setValue)
+        self.page_start_image.valueChanged.connect(self.start_slider.setValue)
+        self.page_end_image.valueChanged.connect(self.end_slider.setValue)
+
+        slider_layout.addWidget(self.start_slider)
+        slider_layout.addWidget(self.end_slider)
+
+        range_controls.addWidget(self.page_end_image)
+        range_controls.addWidget(self.page_start_image)
+
+        range_layout.addWidget(self.all_pages_checkbox)
+        range_layout.addLayout(range_controls)
+        range_layout.addLayout(slider_layout)
+        layout.addWidget(range_frame)
+
+        # Extraction options in a grouped frame
+        options_frame = QFrame()
+        options_frame.setStyleSheet(
+            "QFrame { background: #f8fafc; border-radius: 8px; padding: 10px; }"
         )
+        options_layout = QVBoxLayout(options_frame)
 
-        output_button = QPushButton("  اختيار مجلد الحفظ")
-        output_button.setIcon(
-            qta.icon("fa5s.folder-open", color="#1a237e", scale_factor=1.5)
+        # Output format
+        format_group = QGroupBox("صيغة الإخراج")
+        format_layout = QVBoxLayout()
+        self.files_radio = QRadioButton("ملفات منفصلة")
+        self.ppt_radio = QRadioButton("عرض تقديمي")
+        self.pdf_radio = QRadioButton("ملف PDF جديد")
+        self.files_radio.setChecked(True)
+        format_layout.addWidget(self.files_radio)
+        format_layout.addWidget(self.ppt_radio)
+        format_layout.addWidget(self.pdf_radio)
+        format_group.setLayout(format_layout)
+        options_layout.addWidget(format_group)
+
+        # Image options
+        image_options = QGroupBox("خيارات الصور")
+        image_layout = QVBoxLayout()
+
+        self.invert_checkbox = QCheckBox("عكس الألوان")
+        self.enhance_checkbox = QCheckBox("تحسين جودة الصور")
+        self.remove_bg_checkbox = QCheckBox("إزالة الخلفية")
+
+        self.dpi_combo = QComboBox()
+        self.dpi_combo.addItems(["72 DPI", "150 DPI", "300 DPI", "600 DPI"])
+        self.dpi_combo.setCurrentText("300 DPI")
+
+        self.format_combo = QComboBox()
+        self.format_combo.addItems(["PNG", "JPEG", "TIFF", "BMP"])
+
+        image_layout.addWidget(self.invert_checkbox)
+        image_layout.addWidget(self.enhance_checkbox)
+        image_layout.addWidget(self.remove_bg_checkbox)
+        image_layout.addWidget(QLabel("دقة الصور:"))
+        image_layout.addWidget(self.dpi_combo)
+        image_layout.addWidget(QLabel("صيغة الصور:"))
+        image_layout.addWidget(self.format_combo)
+        image_options.setLayout(image_layout)
+        options_layout.addWidget(image_options)
+
+        layout.addWidget(options_frame)
+
+        # Progress section
+        progress_frame = QFrame()
+        progress_frame.setStyleSheet(
+            "QFrame { background: #f8fafc; border-radius: 8px; padding: 10px; }"
         )
-        output_button.setIconSize(output_button.iconSize() * 2)
-        output_button.setStyleSheet(self.get_button_style())
-        output_button.setMinimumHeight(50)
-        output_button.clicked.connect(self.select_output)
+        progress_layout = QVBoxLayout(progress_frame)
 
-        # Add hover effect
-        output_button.enterEvent = lambda e: self.button_hover_effect(
-            output_button, True
-        )
-        output_button.leaveEvent = lambda e: self.button_hover_effect(
-            output_button, False
-        )
-
-        output_layout.addWidget(self.output_label, stretch=1)
-        output_layout.addWidget(output_button)
-        frame_layout.addLayout(output_layout)
-
-        # Add Radio Buttons for Inversion Option
-        inversion_group = QButtonGroup(self)
-        inversion_layout = QHBoxLayout()
-
-        self.normal_radio = QRadioButton("صور عادية")
-        self.inverted_radio = QRadioButton("صور معكوسة")
-        self.normal_radio.setChecked(True)  # Default to normal
-
-        for radio in [self.normal_radio, self.inverted_radio]:
-            radio.setStyleSheet(
-                """
-                QRadioButton {
-                    font-size: 16px;
-                    color: #1976D2;
-                    padding: 10px;
-                }
-                QRadioButton::indicator {
-                    width: 20px;
-                    height: 20px;
-                }
-            """
-            )
-            inversion_group.addButton(radio)
-            inversion_layout.addWidget(radio)
-
-        frame_layout.addLayout(inversion_layout)
-
-        # Add Radio Buttons for Export Option
-        export_group = QButtonGroup(self)
-        export_layout = QHBoxLayout()
-
-        self.files_radio = QRadioButton("حفظ كملفات")
-        self.ppt_radio = QRadioButton("حفظ كعرض تقديمي")
-        self.files_radio.setChecked(True)  # Default to files
-
-        for radio in [self.files_radio, self.ppt_radio]:
-            radio.setStyleSheet(
-                """
-                QRadioButton {
-                    font-size: 16px;
-                    color: #1976D2;
-                    padding: 10px;
-                }
-                QRadioButton::indicator {
-                    width: 20px;
-                    height: 20px;
-                }
-            """
-            )
-            export_group.addButton(radio)
-            export_layout.addWidget(radio)
-
-        frame_layout.addLayout(export_layout)
-
-        # Progress Bar and Status Label
         self.progress_bar = QProgressBar()
-        self.progress_bar.setTextVisible(True)
         self.progress_bar.setStyleSheet(
             """
             QProgressBar {
-                border: 2px solid rgba(25, 118, 210, 0.2);
-                border-radius: 15px;
+                border: none;
+                border-radius: 5px;
+                background: #e2e8f0;
                 text-align: center;
-                background: rgba(255, 255, 255, 0.8);
-                height: 30px;
             }
             QProgressBar::chunk {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                    stop:0 #2196F3, stop:1 #1976D2);
-                border-radius: 13px;
+                background: #4F46E5;
+                border-radius: 5px;
             }
         """
         )
-        frame_layout.addWidget(self.progress_bar)
 
-        # Status Label
-        self.status_label = QLabel("جاهز")
-        self.status_label.setAlignment(Qt.AlignCenter)
-        self.status_label.setStyleSheet(
-            """
-            color: #1976D2;
-            font-size: 18px;
-            padding: 10px;
-            background: rgba(255, 255, 255, 0.8);
-            border-radius: 10px;
-            border: 1px solid rgba(25, 118, 210, 0.2);
-        """
-        )
-        frame_layout.addWidget(self.status_label)
+        self.status_label = QLabel()
+        self.status_label.setStyleSheet("color: #4F46E5;")
 
-        # Buttons Layout
-        buttons_layout = QHBoxLayout()
+        progress_layout.addWidget(self.progress_bar)
+        progress_layout.addWidget(self.status_label)
+        layout.addWidget(progress_frame)
 
-        # Extract Button
-        self.extract_button = QPushButton("استخراج الصور")
-        self.extract_button.setIcon(
-            qta.icon("fa5s.images", color="white", scale_factor=1.5)
-        )
-        self.extract_button.setStyleSheet(self.get_button_style(primary=True))
+        # Action buttons
+        button_layout = QHBoxLayout()
+        self.extract_button = QPushButton(qta.icon("fa5s.images"), "استخراج الصور")
+        self.stop_button = QPushButton(qta.icon("fa5s.stop"), "إيقاف")
         self.extract_button.clicked.connect(self.start_extraction)
-        self.extract_button.setEnabled(False)
-        buttons_layout.addWidget(self.extract_button)
-
-        # Stop Button
-        self.stop_button = QPushButton("إيقاف")
-        self.stop_button.setIcon(qta.icon("fa5s.stop", color="white", scale_factor=1.5))
-        self.stop_button.setStyleSheet(self.get_button_style(warning=True))
         self.stop_button.clicked.connect(self.stop_extraction)
         self.stop_button.setEnabled(False)
-        buttons_layout.addWidget(self.stop_button)
+        button_layout.addWidget(self.stop_button)
+        button_layout.addWidget(self.extract_button)
+        layout.addLayout(button_layout)
 
-        frame_layout.addLayout(buttons_layout)
+        # Right side - Preview
+        right_widget = QWidget()
+        preview_layout = QVBoxLayout(right_widget)
+        preview_layout.setContentsMargins(20, 20, 20, 20)
 
-        # Add stretching space
-        frame_layout.addStretch()
+        self.preview_label = QLabel("معاينة الصفحة")
+        self.preview_label.setAlignment(Qt.AlignCenter)
+        self.preview_scroll = QScrollArea()
+        self.preview_scroll.setWidget(self.preview_label)
+        self.preview_scroll.setWidgetResizable(True)
+        preview_layout.addWidget(self.preview_scroll)
+
+        # Add widgets to splitter
+        splitter.addWidget(left_widget)
+        splitter.addWidget(right_widget)
+        splitter.setStretchFactor(0, 1)
+        splitter.setStretchFactor(1, 1)
+
+        # Main layout
+        main_layout = QVBoxLayout(widget)
+        main_layout.addWidget(splitter)
+
+        return widget
+
+    def create_bookmark_tab(self):
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(30, 30, 30, 30)
+        layout.setSpacing(20)
+
+        # PDF selection
+        pdf_layout = QHBoxLayout()
+        self.pdf_path_bookmark = QLineEdit()
+        self.pdf_path_bookmark.setPlaceholderText("اختر ملف PDF...")
+        btn_select_pdf = QPushButton("تصفح")
+        btn_select_pdf.clicked.connect(self.select_pdf_bookmark)
+        pdf_layout.addWidget(btn_select_pdf)
+        pdf_layout.addWidget(self.pdf_path_bookmark)
+        layout.addLayout(pdf_layout)
+
+        # Bookmarks file selection
+        bookmarks_layout = QHBoxLayout()
+        self.bookmarks_path = QLineEdit()
+        self.bookmarks_path.setPlaceholderText("اختر ملف العناوين...")
+        btn_select_bookmarks = QPushButton("تصفح")
+        btn_select_bookmarks.clicked.connect(self.select_bookmarks)
+        bookmarks_layout.addWidget(btn_select_bookmarks)
+        bookmarks_layout.addWidget(self.bookmarks_path)
+        layout.addLayout(bookmarks_layout)
+
+        # Add bookmarks button
+        btn_add = QPushButton("إضافة العناوين")
+        btn_add.clicked.connect(self.add_bookmarks)
+        layout.addWidget(btn_add)
+
+        # Status label
+        self.status_label_bookmark = QLabel()
+        layout.addWidget(self.status_label_bookmark)
+
+        layout.addStretch()
+        return widget
+
+    def create_extract_tab(self):
+        # Implementation of create_extract_tab method
+        pass
+
+    def create_text_tab(self):
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(30, 30, 30, 30)
+        layout.setSpacing(20)
+
+        # PDF selection with icon
+        pdf_layout = QHBoxLayout()
+        self.pdf_path_text = QLineEdit()
+        self.pdf_path_text.setPlaceholderText("اختر ملف PDF...")
+        btn_select_pdf = QPushButton(qta.icon("fa5s.file-pdf"), "تصفح")
+        btn_select_pdf.clicked.connect(self.select_pdf_text)
+        pdf_layout.addWidget(btn_select_pdf)
+        pdf_layout.addWidget(self.pdf_path_text)
+        layout.addLayout(pdf_layout)
+
+        # Page range with modern spinboxes
+        range_layout = QHBoxLayout()
+        self.page_start = QSpinBox()
+        self.page_end = QSpinBox()
+        self.page_start.setPrefix("من صفحة: ")
+        self.page_end.setPrefix("إلى صفحة: ")
+        self.page_start.setMinimum(1)
+        self.page_end.setMinimum(1)
+        range_layout.addWidget(self.page_end)
+        range_layout.addWidget(self.page_start)
+        layout.addLayout(range_layout)
+
+        # Text options
+        options_layout = QHBoxLayout()
+        self.remove_linebreaks = QCheckBox("إزالة فواصل الأسطر")
+        self.include_images = QCheckBox("تضمين النص من الصور")
+        options_layout.addWidget(self.include_images)
+        options_layout.addWidget(self.remove_linebreaks)
+        layout.addLayout(options_layout)
+
+        # Preview area
+        self.text_preview = QTextEdit()
+        self.text_preview.setPlaceholderText("معاينة النص المستخرج...")
+        self.text_preview.setReadOnly(True)
+        layout.addWidget(self.text_preview)
+
+        # Action buttons with progress
+        action_layout = QHBoxLayout()
+        self.extract_progress = QProgressBar()
+        self.extract_progress.setVisible(False)
+        btn_extract = QPushButton(qta.icon("fa5s.file-export"), "استخراج النص")
+        btn_extract.clicked.connect(self.extract_text)
+        btn_copy = QPushButton(qta.icon("fa5s.copy"), "نسخ النص")
+        btn_copy.clicked.connect(self.copy_text)
+        action_layout.addWidget(self.extract_progress)
+        action_layout.addWidget(btn_copy)
+        action_layout.addWidget(btn_extract)
+        layout.addLayout(action_layout)
+
+        return widget
+
+    def create_split_tab(self):
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(30, 30, 30, 30)
+        layout.setSpacing(20)
+
+        # PDF selection
+        pdf_layout = QHBoxLayout()
+        self.pdf_path_split = QLineEdit()
+        self.pdf_path_split.setPlaceholderText("اختر ملف PDF...")
+        btn_select_pdf = QPushButton(qta.icon("fa5s.file-pdf"), "تصفح")
+        btn_select_pdf.clicked.connect(self.select_pdf_split)
+        pdf_layout.addWidget(btn_select_pdf)
+        pdf_layout.addWidget(self.pdf_path_split)
+        layout.addLayout(pdf_layout)
+
+        # Split options
+        options_layout = QHBoxLayout()
+        self.split_method = QComboBox()
+        self.split_method.addItems(
+            ["تقسيم حسب العناوين", "تقسيم حسب عدد الصفحات", "تقسيم حسب صفحات محددة"]
+        )
+        self.split_method.currentIndexChanged.connect(self.update_split_options)
+        options_layout.addWidget(self.split_method)
+        layout.addLayout(options_layout)
+
+        # Split settings (dynamic based on method)
+        self.split_settings = QWidget()
+        self.split_settings_layout = QVBoxLayout(self.split_settings)
+        layout.addWidget(self.split_settings)
+
+        # Progress and action
+        self.split_progress = QProgressBar()
+        self.split_progress.setVisible(False)
+        btn_split = QPushButton(qta.icon("fa5s.cut"), "تقسيم الملف")
+        btn_split.clicked.connect(self.split_pdf)
+        layout.addWidget(self.split_progress)
+        layout.addWidget(btn_split)
+
+        return widget
+
+    def create_merge_tab(self):
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(30, 30, 30, 30)
+        layout.setSpacing(20)
+
+        # PDF list
+        self.pdf_list = QListWidget()
+        self.pdf_list.setDragDropMode(QListWidget.InternalMove)
+        layout.addWidget(self.pdf_list)
+
+        # Buttons
+        btn_layout = QHBoxLayout()
+        btn_add = QPushButton(qta.icon("fa5s.plus"), "إضافة ملف")
+        btn_remove = QPushButton(qta.icon("fa5s.minus"), "إزالة الملف")
+        btn_clear = QPushButton(qta.icon("fa5s.trash"), "مسح القائمة")
+        btn_add.clicked.connect(self.add_pdf_to_merge)
+        btn_remove.clicked.connect(self.remove_pdf_from_merge)
+        btn_clear.clicked.connect(self.clear_merge_list)
+        btn_layout.addWidget(btn_clear)
+        btn_layout.addWidget(btn_remove)
+        btn_layout.addWidget(btn_add)
+        layout.addLayout(btn_layout)
+
+        # Merge options
+        options_layout = QHBoxLayout()
+        self.merge_bookmarks = QCheckBox("دمج العناوين")
+        self.merge_outline = QCheckBox("إنشاء فهرس")
+        options_layout.addWidget(self.merge_outline)
+        options_layout.addWidget(self.merge_bookmarks)
+        layout.addLayout(options_layout)
+
+        # Progress and action
+        self.merge_progress = QProgressBar()
+        self.merge_progress.setVisible(False)
+        btn_merge = QPushButton(qta.icon("fa5s.object-group"), "دمج الملفات")
+        btn_merge.clicked.connect(self.merge_pdfs)
+        layout.addWidget(self.merge_progress)
+        layout.addWidget(btn_merge)
+
+        return widget
 
     def setup_menubar(self):
         menubar = self.menuBar()
@@ -516,50 +732,126 @@ class MainWindow(QMainWindow):
         self.extract_button.setEnabled(bool(self.pdf_path and self.output_dir))
 
     def start_extraction(self):
-        if not self.pdf_path or not self.output_dir:
+        """Start image extraction with page range"""
+        pdf_path = self.pdf_path_image.text()
+        if not pdf_path:
+            QMessageBox.warning(self, "تنبيه", "الرجاء اختيار ملف PDF أولاً")
             return
 
+        # Get page range
+        if self.all_pages_checkbox.isChecked():
+            start_page = 1
+            doc = fitz.open(pdf_path)
+            end_page = doc.page_count
+            doc.close()
+        else:
+            start_page = self.page_start_image.value()
+            end_page = self.page_end_image.value()
+
+        if start_page > end_page:
+            QMessageBox.warning(
+                self,
+                "خطأ",
+                "رقم صفحة البداية يجب أن يكون أقل من أو يساوي رقم صفحة النهاية",
+            )
+            return
+
+        # Collect all options
+        options = {
+            "output_type": "pptx" if self.ppt_radio.isChecked() else "files",
+            "invert": self.invert_checkbox.isChecked(),
+            "enhance": (
+                self.enhance_checkbox.isChecked()
+                if hasattr(self, "enhance_checkbox")
+                else False
+            ),
+            "remove_bg": (
+                self.remove_bg_checkbox.isChecked()
+                if hasattr(self, "remove_bg_checkbox")
+                else False
+            ),
+            "dpi": (
+                int(self.dpi_combo.currentText().split()[0])
+                if hasattr(self, "dpi_combo")
+                else 300
+            ),
+            "format": (
+                self.format_combo.currentText()
+                if hasattr(self, "format_combo")
+                else "PNG"
+            ),
+        }
+
+        # Start extraction
         self.extract_button.setEnabled(False)
         self.stop_button.setEnabled(True)
-        self.progress_bar.setMaximum(100)
         self.progress_bar.setValue(0)
         self.status_label.setText("جاري استخراج الصور...")
 
-        # Create and start worker thread
-        self.worker = ExtractionWorker(
-            self.pdf_path,
-            self.output_dir,
-            self.inverted_radio.isChecked(),
-            self.ppt_radio.isChecked(),
+        # Create worker thread with options
+        self.extraction_thread = ExtractionWorker(
+            pdf_path,
+            self.settings.get_default_output_dir(),
+            options["invert"],
+            options["output_type"] == "pptx",
         )
-        self.worker.progress.connect(self.update_progress)
-        self.worker.finished.connect(self.extraction_complete)
-        self.worker.error.connect(self.extraction_error)
-        self.worker.start()
+
+        # Connect signals
+        self.extraction_thread.progress.connect(self.update_progress)
+        self.extraction_thread.finished.connect(self.extraction_complete)
+        self.extraction_thread.error.connect(self.extraction_error)
+        self.extraction_thread.start()
 
     def stop_extraction(self):
-        if hasattr(self, "worker") and self.worker.isRunning():
-            self.worker.stop()
-            self.worker.wait()
+        """Stop the extraction process"""
+        if hasattr(self, "extraction_thread") and self.extraction_thread.isRunning():
+            self.extraction_thread.stop()
+            self.extraction_thread.wait()
             self.status_label.setText("تم إيقاف العملية")
             self.extract_button.setEnabled(True)
             self.stop_button.setEnabled(False)
 
-    def update_progress(self, current, total):
-        percentage = (current / total) * 100
-        self.progress_bar.setValue(int(percentage))
-        self.status_label.setText(f"جاري المعالجة... {current}/{total}")
+    def update_progress(self, progress_info):
+        """Update progress with detailed information"""
+        try:
+            if isinstance(progress_info, tuple):
+                current, total, message = progress_info
+                if total > 0:  # Prevent division by zero
+                    percentage = min(int((current / total) * 100), 100)
+                    self.progress_bar.setValue(percentage)
+                    self.status_label.setText(message)
+                else:
+                    self.status_label.setText(message)
+            else:
+                # Handle simple percentage updates
+                percentage = min(int(progress_info), 100)
+                self.progress_bar.setValue(percentage)
+                self.status_label.setText(f"جاري المعالجة... {percentage}%")
+        except Exception as e:
+            print(f"Error updating progress: {str(e)}")
+            self.status_label.setText("جاري المعالجة...")
 
-    def extraction_complete(self, num_images):
-        self.progress_bar.setValue(100)
-        if self.ppt_radio.isChecked():
-            self.status_label.setText(
-                f"تم استخراج {num_images} صورة وفتح ملف العرض التقديمي!"
-            )
-        else:
-            self.status_label.setText(f"تم استخراج {num_images} صورة بنجاح!")
+    def extraction_complete(self, result):
+        """Handle extraction completion"""
+        success, message, count = result
         self.extract_button.setEnabled(True)
         self.stop_button.setEnabled(False)
+
+        if success:
+            self.progress_bar.setValue(100)
+            self.status_label.setText(f"تم استخراج {count} صورة بنجاح")
+
+            # Clear progress after a short delay
+            QTimer.singleShot(2000, lambda: self.progress_bar.setValue(0))
+
+            # Show success message
+            QMessageBox.information(
+                self, "اكتمال العملية", f"تم استخراج {count} صورة بنجاح\n{message}"
+            )
+        else:
+            self.progress_bar.setValue(0)
+            self.status_label.setText(message)
+            QMessageBox.warning(self, "خطأ", message)
 
     def extraction_error(self, error_message):
         self.progress_bar.setValue(0)
@@ -575,3 +867,349 @@ class MainWindow(QMainWindow):
             button.setStyleSheet(self.get_button_style(warning=True, hover=hover))
         else:
             button.setStyleSheet(self.get_button_style(hover=hover))
+
+    def browse_pdf(self):
+        start_dir = self.settings.get_last_directory()
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "اختر ملف PDF", start_dir, "PDF Files (*.pdf)"
+        )
+        if file_path:
+            self.pdf_path = file_path
+            self.pdf_label.setText(Path(file_path).name)
+            self.settings.save_last_pdf_path(file_path)
+            self.update_extract_button()
+
+    def get_output_filename(self):
+        pdf_name = os.path.splitext(os.path.basename(self.pdf_path))[0]
+        timestamp = datetime.now().strftime("%H%M%S")
+        return f"{pdf_name}_{timestamp}"
+
+    def select_pdf_bookmark(self):
+        """Select PDF file for bookmarks"""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "اختر ملف PDF",
+            self.settings.get_last_directory(),
+            "PDF Files (*.pdf)",
+        )
+        if file_path:
+            self.pdf_path_bookmark.setText(file_path)
+            self.settings.save_last_pdf_path(file_path)
+
+    def select_bookmarks(self):
+        """Select bookmarks text file"""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "اختر ملف العناوين",
+            self.settings.get_last_directory(),
+            "Text Files (*.txt)",
+        )
+        if file_path:
+            self.bookmarks_path.setText(file_path)
+
+    def add_bookmarks(self):
+        """Add bookmarks to PDF"""
+        pdf_path = self.pdf_path_bookmark.text()
+        bookmarks_path = self.bookmarks_path.text()
+
+        if not pdf_path or not bookmarks_path:
+            QMessageBox.warning(self, "تنبيه", "الرجاء اختيار ملف PDF وملف العناوين")
+            return
+
+        try:
+            success, message = self.pdf_tools.add_bookmarks(pdf_path, bookmarks_path)
+            if success:
+                QMessageBox.information(self, "نجاح", message)
+            else:
+                QMessageBox.warning(self, "خطأ", message)
+        except Exception as e:
+            QMessageBox.critical(self, "خطأ", f"حدث خطأ: {str(e)}")
+
+    def select_pdf_text(self):
+        """Select PDF file for text extraction"""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "اختر ملف PDF",
+            self.settings.get_last_directory(),
+            "PDF Files (*.pdf)",
+        )
+        if file_path:
+            self.pdf_path_text.setText(file_path)
+            self.settings.save_last_pdf_path(file_path)
+
+    def extract_text(self):
+        """Extract text from PDF"""
+        pdf_path = self.pdf_path_text.text()
+        if not pdf_path:
+            QMessageBox.warning(self, "تنبيه", "الرجاء اختيار ملف PDF")
+            return
+
+        try:
+            start_page = self.page_start.value()
+            end_page = self.page_end.value()
+            remove_linebreaks = self.remove_linebreaks.isChecked()
+            include_images = self.include_images.isChecked()
+
+            text = self.pdf_tools.extract_text_with_options(
+                pdf_path, start_page, end_page, remove_linebreaks, include_images
+            )
+            self.text_preview.setText(text)
+        except Exception as e:
+            QMessageBox.critical(self, "خطأ", f"حدث خطأ: {str(e)}")
+
+    def copy_text(self):
+        """Copy extracted text to clipboard"""
+        text = self.text_preview.toPlainText()
+        if text:
+            clipboard = QApplication.clipboard()
+            clipboard.setText(text)
+            self.status_label_text.setText("تم نسخ النص")
+            QTimer.singleShot(2000, lambda: self.status_label_text.clear())
+
+    def select_pdf_split(self):
+        """Select PDF file for splitting"""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "اختر ملف PDF",
+            self.settings.get_last_directory(),
+            "PDF Files (*.pdf)",
+        )
+        if file_path:
+            self.pdf_path_split.setText(file_path)
+            self.settings.save_last_pdf_path(file_path)
+
+    def update_split_options(self):
+        """Update split options based on selected method"""
+        # Clear previous options
+        for i in reversed(range(self.split_settings_layout.count())):
+            self.split_settings_layout.itemAt(i).widget().setParent(None)
+
+        method = self.split_method.currentText()
+        if method == "تقسيم حسب عدد الصفحات":
+            self.pages_per_file = QSpinBox()
+            self.pages_per_file.setMinimum(1)
+            self.pages_per_file.setValue(10)
+            self.pages_per_file.setPrefix("عدد الصفحات لكل ملف: ")
+            self.split_settings_layout.addWidget(self.pages_per_file)
+        elif method == "تقسيم حسب صفحات محددة":
+            self.page_ranges = QLineEdit()
+            self.page_ranges.setPlaceholderText("مثال: 1-5, 6-10, 11-15")
+            self.split_settings_layout.addWidget(self.page_ranges)
+
+    def split_pdf(self):
+        """Split PDF based on selected method"""
+        pdf_path = self.pdf_path_split.text()
+        if not pdf_path:
+            QMessageBox.warning(self, "تنبيه", "الرجاء اختيار ملف PDF")
+            return
+
+        try:
+            method = self.split_method.currentText()
+            output_dir = self.settings.get_default_output_dir()
+            self.split_progress.setVisible(True)
+
+            success = False
+            message = ""
+
+            if method == "تقسيم حسب العناوين":
+                success, message = self.pdf_tools.split_pdf_by_bookmarks(
+                    pdf_path, output_dir
+                )
+
+            elif method == "تقسيم حسب عدد الصفحات":
+                pages_per_file = self.pages_per_file.value()
+                success, message = self.pdf_tools.split_pdf_by_pages(
+                    pdf_path, output_dir, pages_per_file
+                )
+
+            elif method == "تقسيم حسب صفحات محددة":
+                try:
+                    ranges = []
+                    for range_str in self.page_ranges.text().split(","):
+                        start, end = map(int, range_str.strip().split("-"))
+                        ranges.append((start, end))
+                    success, message = self.pdf_tools.split_pdf_by_ranges(
+                        pdf_path, output_dir, ranges
+                    )
+                except ValueError:
+                    message = (
+                        "صيغة المدى غير صحيحة. الرجاء استخدام الصيغة: 1-5, 6-10, 11-15"
+                    )
+                    success = False
+
+            self.split_progress.setVisible(False)
+
+            if success:
+                QMessageBox.information(self, "نجاح", message)
+                # Open the output directory
+                os.startfile(output_dir)
+            else:
+                QMessageBox.warning(self, "خطأ", message)
+
+        except Exception as e:
+            self.split_progress.setVisible(False)
+            QMessageBox.critical(self, "خطأ", f"حدث خطأ: {str(e)}")
+
+    def add_pdf_to_merge(self):
+        """Add PDF file to merge list"""
+        files, _ = QFileDialog.getOpenFileNames(
+            self,
+            "اختر ملفات PDF",
+            self.settings.get_last_directory(),
+            "PDF Files (*.pdf)",
+        )
+
+        if files:
+            for file_path in files:
+                item = QtWidgets.QListWidgetItem(os.path.basename(file_path))
+                item.setData(Qt.UserRole, file_path)  # Store full path
+                self.pdf_list.addItem(item)
+
+            # Save last directory
+            self.settings.save_last_pdf_path(files[0])
+
+    def remove_pdf_from_merge(self):
+        """Remove selected PDF from merge list"""
+        current_item = self.pdf_list.currentItem()
+        if current_item:
+            self.pdf_list.takeItem(self.pdf_list.row(current_item))
+
+    def clear_merge_list(self):
+        """Clear all PDFs from merge list"""
+        self.pdf_list.clear()
+
+    def merge_pdfs(self):
+        """Merge selected PDFs"""
+        if self.pdf_list.count() == 0:
+            QMessageBox.warning(self, "تنبيه", "الرجاء إضافة ملفات PDF للدمج")
+            return
+
+        output_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "حفظ الملف المدمج",
+            os.path.join(self.settings.get_default_output_dir(), "merged.pdf"),
+            "PDF Files (*.pdf)",
+        )
+
+        if not output_path:
+            return
+
+        try:
+            # Get all PDF paths
+            pdf_paths = []
+            for i in range(self.pdf_list.count()):
+                item = self.pdf_list.item(i)
+                pdf_paths.append(item.data(Qt.UserRole))
+
+            # Show progress bar
+            self.merge_progress.setVisible(True)
+            self.merge_progress.setRange(0, len(pdf_paths))
+            self.merge_progress.setValue(0)
+
+            # Merge PDFs
+            merge_bookmarks = self.merge_bookmarks.isChecked()
+            create_outline = self.merge_outline.isChecked()
+
+            success, message = self.pdf_tools.merge_pdfs(
+                pdf_paths,
+                output_path,
+                merge_bookmarks,
+                create_outline,
+                progress_callback=lambda x: self.merge_progress.setValue(x),
+            )
+
+            self.merge_progress.setVisible(False)
+
+            if success:
+                QMessageBox.information(self, "نجاح", message)
+                # Open containing folder
+                os.startfile(os.path.dirname(output_path))
+            else:
+                QMessageBox.warning(self, "خطأ", message)
+
+        except Exception as e:
+            self.merge_progress.setVisible(False)
+            QMessageBox.critical(self, "خطأ", f"حدث خطأ أثناء دمج الملفات: {str(e)}")
+
+    def update_merge_progress(self, value):
+        """Update merge progress bar"""
+        self.merge_progress.setValue(value)
+
+    def toggle_page_range(self, state):
+        """Enable/disable page range inputs based on checkbox"""
+        enabled = not bool(state)
+        self.page_start_image.setEnabled(enabled)
+        self.page_end_image.setEnabled(enabled)
+        self.start_slider.setEnabled(enabled)
+        self.end_slider.setEnabled(enabled)
+
+    def select_pdf_image(self):
+        """Select PDF file for image extraction"""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "اختر ملف PDF",
+            self.settings.get_last_directory(),
+            "PDF Files (*.pdf)",
+        )
+        if file_path:
+            self.pdf_path_image.setText(file_path)
+            self.settings.save_last_pdf_path(file_path)
+
+            # Update page range limits
+            doc = fitz.open(file_path)
+            max_pages = doc.page_count
+            doc.close()
+
+            self.page_start_image.setMaximum(max_pages)
+            self.page_end_image.setMaximum(max_pages)
+            self.page_end_image.setValue(max_pages)
+
+            # Update sliders
+            self.start_slider.setMinimum(1)
+            self.start_slider.setMaximum(max_pages)
+            self.end_slider.setMinimum(1)
+            self.end_slider.setMaximum(max_pages)
+            self.end_slider.setValue(max_pages)
+
+    def update_preview(self):
+        """Update the PDF page preview"""
+        try:
+            pdf_path = self.pdf_path_image.text()
+            if not pdf_path:
+                return
+
+            # Get current page
+            page_num = self.page_start_image.value() - 1
+
+            doc = fitz.open(pdf_path)
+            page = doc[page_num]
+
+            # Convert page to image
+            pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))
+            img = QImage(
+                pix.samples, pix.width, pix.height, pix.stride, QImage.Format_RGB888
+            )
+
+            # Scale image to fit preview area while maintaining aspect ratio
+            scaled_img = img.scaled(
+                self.preview_scroll.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation
+            )
+
+            # Update preview
+            self.preview_label.setPixmap(QPixmap.fromImage(scaled_img))
+            doc.close()
+
+        except Exception as e:
+            self.preview_label.setText(f"خطأ في المعاينة: {str(e)}")
+
+    def update_page_range(self, max_pages):
+        """Update the range of page selection controls"""
+        self.page_start_image.setMaximum(max_pages)
+        self.page_end_image.setMaximum(max_pages)
+        self.page_end_image.setValue(max_pages)
+
+        self.start_slider.setMinimum(1)
+        self.start_slider.setMaximum(max_pages)
+        self.end_slider.setMinimum(1)
+        self.end_slider.setMaximum(max_pages)
+        self.end_slider.setValue(max_pages)
