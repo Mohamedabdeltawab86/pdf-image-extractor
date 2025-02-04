@@ -1,0 +1,4 @@
+PyMuPDF==1.23.26
+Pillow==10.2.0
+PyQt5==5.15.10
+python-pptx==0.6.21

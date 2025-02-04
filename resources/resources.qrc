@@ -1,0 +1,10 @@
+<!DOCTYPE RCC>
+<RCC version="1.0">
+    <qresource>
+        <file>fonts/Cairo-Regular.ttf</file>
+        <file>icons/pdf.png</file>
+        <file>icons/folder.png</file>
+        <file>icons/extract.png</file>
+        <file>icons/logo.png</file>
+    </qresource>
+</RCC> 
