@@ -1,0 +1,255 @@
+/* Modern Flat Design Theme */
+
+/* Main Window */
+QMainWindow {
+    background-color: #f4f4f8;
+    border-radius: 12px;
+}
+
+/* Common Widget Styles */
+QWidget {
+    font-family: 'Segoe UI', Arial, sans-serif;
+    font-size: 16px;
+    color: #333;
+}
+
+/* Primary Buttons */
+#primaryButton {
+    background-color: #0078d7;
+    color: white;
+    border: none;
+    padding: 12px 24px;
+    border-radius: 8px;
+    min-width: 140px;
+    font-weight: bold;
+}
+
+#primaryButton:hover {
+    background-color: #005bb5;
+}
+
+#primaryButton:pressed {
+    background-color: #004a9f;
+}
+
+#primaryButton:disabled {
+    background-color: #a0c4ff;
+}
+
+/* Action Buttons */
+#actionButton {
+    background-color: #16a085;
+    color: white;
+    border: none;
+    padding: 12px 24px;
+    border-radius: 8px;
+    min-width: 160px;
+    font-weight: bold;
+}
+
+#actionButton:hover {
+    background-color: #12876f;
+}
+
+#actionButton:pressed {
+    background-color: #0f705c;
+}
+
+#actionButton:disabled {
+    background-color: #88dbc1;
+}
+
+/* Secondary Buttons */
+#secondaryButton {
+    background-color: #ffffff;
+    color: #333;
+    border: 2px solid #ddd;
+    padding: 10px 20px;
+    border-radius: 8px;
+    min-width: 140px;
+    font-weight: bold;
+}
+
+#secondaryButton:hover {
+    background-color: #f0f0f0;
+    border: 2px solid #ccc;
+}
+
+#secondaryButton:pressed {
+    background-color: #e0e0e0;
+}
+
+/* Progress Bar */
+#progressBar {
+    border: none;
+    border-radius: 10px;
+    background-color: #e0e0e0;
+    height: 14px;
+}
+
+#progressBar::chunk {
+    background-color: #0078d7;
+    border-radius: 10px;
+}
+
+/* Labels */
+.fileLabel {
+    color: #212529;
+    font-size: 16px;
+    font-weight: bold;
+    padding: 10px;
+}
+
+.statusLabel {
+    color: #6c757d;
+    font-size: 15px;
+    padding: 6px;
+}
+
+/* Radio Buttons */
+QRadioButton {
+    spacing: 10px;
+    color: #333;
+    padding: 6px;
+    font-size: 15px;
+}
+
+QRadioButton::indicator {
+    width: 22px;
+    height: 22px;
+    border-radius: 11px;
+    border: 2px solid #ccc;
+    background-color: white;
+}
+
+QRadioButton::indicator:hover {
+    border-color: #0078d7;
+}
+
+QRadioButton::indicator:checked {
+    background-color: #0078d7;
+    border: 2px solid #0078d7;
+}
+
+/* Checkboxes */
+QCheckBox {
+    spacing: 10px;
+    color: #333;
+    padding: 6px;
+    font-size: 15px;
+}
+
+QCheckBox::indicator {
+    width: 22px;
+    height: 22px;
+    border-radius: 5px;
+    border: 2px solid #ccc;
+    background-color: white;
+}
+
+QCheckBox::indicator:hover {
+    border-color: #0078d7;
+}
+
+QCheckBox::indicator:checked {
+    background-color: #0078d7;
+    border: 2px solid #0078d7;
+}
+
+/* Spinboxes */
+QSpinBox {
+    padding: 6px;
+    border: 2px solid #ddd;
+    border-radius: 8px;
+    background-color: white;
+    font-size: 16px;
+}
+
+QSpinBox:hover, QSpinBox:focus {
+    border-color: #0078d7;
+    background-color: #f4f4f8;
+}
+
+/* Preview Dialog */
+PreviewDialog {
+    background-color: white;
+    border-radius: 12px;
+}
+
+ImagePreviewLabel {
+    border: 2px solid #ddd;
+    border-radius: 10px;
+    padding: 5px;
+    background-color: white;
+}
+
+ImagePreviewLabel:hover {
+    border: 2px solid #0078d7;
+    background-color: #f4f4f8;
+}
+
+/* Scroll Area */
+QScrollArea {
+    border: none;
+    background-color: white;
+}
+
+QScrollBar:vertical {
+    border: none;
+    background-color: #f4f4f8;
+    width: 12px;
+}
+
+QScrollBar::handle:vertical {
+    background-color: #ccc;
+    border-radius: 6px;
+    min-height: 25px;
+}
+
+QScrollBar::handle:vertical:hover {
+    background-color: #aaa;
+}
+
+QScrollBar::add-line:vertical,
+QScrollBar::sub-line:vertical {
+    height: 0px;
+}
+
+/* File Dialog */
+QFileDialog {
+    background-color: white;
+}
+
+QFileDialog QListView {
+    background-color: white;
+    border: none;
+}
+
+QFileDialog QListView::item:hover {
+    background-color: #f4f4f8;
+}
+
+QFileDialog QListView::item:selected {
+    background-color: #d0ebff;
+    color: #0078d7;
+}
+
+/* Message Box */
+QMessageBox {
+    background-color: white;
+}
+
+QMessageBox QPushButton {
+    min-width: 110px;
+    padding: 10px 18px;
+}
+
+/* Tooltips */
+QToolTip {
+    background-color: #333;
+    color: white;
+    border: none;
+    padding: 6px;
+    border-radius: 5px;
+    font-size: 14px;
+}

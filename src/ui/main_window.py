@@ -23,7 +23,7 @@ from PyQt5.QtWidgets import (
     QCheckBox,
     QSpinBox,
 )
-from PyQt5.QtCore import Qt, QThread, pyqtSignal, QDir, QSettings
+from PyQt5.QtCore import Qt, QThread, pyqtSignal, QDir, QSettings, QFile, QTextStream
 from PyQt5.QtGui import QIcon, QFont, QFontDatabase, QPalette, QColor, QPixmap, QImage
 import qtawesome as qta  # For better icons, install with: pip install qtawesome
 from pathlib import Path
@@ -248,6 +248,7 @@ class PreviewDialog(QDialog):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
+        self.load_styles()  # Add this line before initializing UI
         self.setWindowTitle("PDF Image Extractor")
         self.setMinimumWidth(400)
 
@@ -349,6 +350,41 @@ class MainWindow(QMainWindow):
         self.extraction_thread = None
         self.preview_images = []
         self.inverted_indices = []
+
+    def load_styles(self):
+        """Load and apply QSS styles"""
+        try:
+            # Get the absolute path to the QSS file
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            style_path = os.path.join(
+                current_dir, "..", "resources", "styles", "main.qss"
+            )
+
+            style_file = QFile(style_path)
+            if style_file.open(QFile.ReadOnly | QFile.Text):
+                stream = QTextStream(style_file)
+                self.setStyleSheet(stream.readAll())
+                style_file.close()
+            else:
+                print(f"Could not open style file: {style_path}")
+        except Exception as e:
+            print(f"Error loading styles: {str(e)}")
+
+    def init_ui(self):
+        # Add object names to widgets for specific styling
+        self.browse_button.setObjectName("primaryButton")
+        self.extract_button.setObjectName("actionButton")
+        self.preview_button.setObjectName("secondaryButton")
+        self.progress_bar.setObjectName("progressBar")
+
+        # Add classes to widgets
+        self.file_label.setProperty("class", "fileLabel")
+        self.status_label.setProperty("class", "statusLabel")
+
+        # For radio buttons group
+        radio_container = QWidget()
+        radio_container.setObjectName("radioContainer")
+        output_layout.addWidget(radio_container)
 
     def browse_file(self):
         file_path, _ = QFileDialog.getOpenFileName(
