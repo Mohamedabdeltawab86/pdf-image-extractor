@@ -315,8 +315,13 @@ class ImageExtractionThread(QThread):
 
     def extract_to_ppt(self, processed_images, output_path, include_non_annotated=True):
         """Extract images to PowerPoint file."""
+        temp_files = []  # Keep track of temporary files
         try:
             prs = Presentation()
+
+            # Set slide dimensions (16:9)
+            prs.slide_width = Inches(13.333)
+            prs.slide_height = Inches(7.5)
 
             # Set default slide background to black
             for layout in prs.slide_layouts:
@@ -326,35 +331,77 @@ class ImageExtractionThread(QThread):
                 fill.fore_color.rgb = RGBColor(0, 0, 0)
 
             for i, (image_bytes, caption) in enumerate(processed_images):
-                # Save temporary image file
-                temp_path = os.path.join(self.output_dir, f"temp_image_{i}.png")
+                # Create unique temporary file name
+                temp_path = os.path.join(
+                    self.output_dir, f"temp_image_{i}_{os.getpid()}.png"
+                )
+                temp_files.append(temp_path)  # Add to cleanup list
+
+                # Save image to temporary file
                 with open(temp_path, "wb") as f:
                     f.write(image_bytes)
 
+                # Get image dimensions before adding to slide
+                with Image.open(temp_path) as img:
+                    img_width, img_height = img.size
+                    aspect_ratio = img_width / img_height
+
                 # Add to PowerPoint
                 slide = prs.slides.add_slide(prs.slide_layouts[5])
-                # Center the image
-                left = (prs.slide_width - Inches(6)) / 2
-                top = (prs.slide_height - Inches(4.5)) / 2
-                slide.shapes.add_picture(temp_path, left, top, height=Inches(4.5))
+
+                # Set maximum dimensions (leaving margins)
+                max_width = Inches(12)  # 1.333 inch margin total
+                max_height = Inches(6.75)  # 0.75 inch margin total
+
+                # Calculate dimensions maintaining aspect ratio
+                if aspect_ratio > max_width / max_height:
+                    width = max_width
+                    height = width / aspect_ratio
+                else:
+                    height = max_height
+                    width = height * aspect_ratio
+
+                # Center the image on slide
+                left = (prs.slide_width - width) / 2
+                top = (prs.slide_height - height) / 2
+
+                # Add picture with calculated dimensions
+                slide.shapes.add_picture(
+                    temp_path, left, top, width=width, height=height
+                )
 
                 # Add caption if exists
                 if caption:
                     notes_slide = slide.notes_slide
                     notes_slide.notes_text_frame.text = caption
 
-                # Clean up temp file
-                os.remove(temp_path)
-
             # Save PowerPoint file
             prs.save(output_path)
+
+            # Clean up all temporary files
+            for temp_file in temp_files:
+                try:
+                    if os.path.exists(temp_file):
+                        os.remove(temp_file)
+                except Exception as e:
+                    print(
+                        f"Warning: Could not remove temporary file {temp_file}: {str(e)}"
+                    )
 
             # Open the PowerPoint file
             self.open_file(output_path)
 
             return True
+
         except Exception as e:
             print(f"Error creating PowerPoint: {str(e)}")
+            # Attempt to clean up on error
+            for temp_file in temp_files:
+                try:
+                    if os.path.exists(temp_file):
+                        os.remove(temp_file)
+                except:
+                    pass
             return False
 
     def run(self):
