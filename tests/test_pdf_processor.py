@@ -1,7 +1,7 @@
 import unittest
 import os
 from pathlib import Path
-from src.core.pdf_processor import extract_images_from_pdf
+from src.modules.pdf_processor import extract_images_from_pdf
 from src.util.image_handler import save_image
 from PIL import Image
 import io

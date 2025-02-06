@@ -1,7 +1,7 @@
 import sys
 from PyQt5.QtWidgets import QApplication
 from PyQt5.QtCore import Qt
-from .main_window import MainWindow
+from src.ui.main_window import MainWindow
 from . import resources_rc
 
 
@@ -17,4 +17,4 @@ def run_app():
     window = MainWindow()
     window.show()
 
-    sys.exit(app.exec_())
+    return app.exec_()
