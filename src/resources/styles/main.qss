@@ -253,3 +253,40 @@ QToolTip {
     border-radius: 5px;
     font-size: 14px;
 }
+
+/* Sidebar Title */
+#sidebarTitle {
+    color: #333;
+    font-size: 24px;
+    font-weight: bold;
+    padding: 20px 0;
+    text-align: center;
+}
+
+/* Module List */
+#moduleList {
+    background-color: #f4f4f8;
+    border: none;
+    border-right: 1px solid #ddd;
+}
+
+#moduleList::item {
+    padding: 15px;
+    border-radius: 8px;
+    margin: 2px 5px;
+}
+
+#moduleList::item:selected {
+    background-color: #0078d7;
+    color: white;
+}
+
+#moduleList::item:hover:!selected {
+    background-color: #e8e8e8;
+}
+
+/* Module Stack */
+#moduleStack {
+    background-color: white;
+    padding: 20px;
+}

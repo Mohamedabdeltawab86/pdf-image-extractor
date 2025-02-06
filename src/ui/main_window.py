@@ -22,12 +22,16 @@ from PyQt5.QtWidgets import (
     QDialog,
     QCheckBox,
     QSpinBox,
+    QListWidget,
+    QListWidgetItem,
+    QStackedWidget,
+    QTabWidget,
 )
 from PyQt5.QtCore import Qt, QThread, pyqtSignal, QDir, QSettings, QFile, QTextStream
 from PyQt5.QtGui import QIcon, QFont, QFontDatabase, QPalette, QColor, QPixmap, QImage
 import qtawesome as qta  # For better icons, install with: pip install qtawesome
 from pathlib import Path
-from ..core.pdf_processor import extract_images_from_pdf
+from ..modules.pdf_processor import extract_images_from_pdf
 from ..util.settings import Settings
 from ..util.translations import Translations
 from . import resources_rc  # Change this line
@@ -38,6 +42,15 @@ from ..util.image_handler import save_image, extract_to_ppt, ImageExtractionThre
 import io
 from PIL import Image
 import os
+import sys
+
+# Add the project root to Python path
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+
+# Now use the imports
+from src.modules.image_extractor.widget import ImageExtractorModule
+from src.modules.bookmark_extractor.widget import BookmarkExtractorModule
+from src.modules.note_extractor.widget import NoteExtractorModule
 
 
 class ExtractionWorker(QThread):
@@ -248,113 +261,12 @@ class PreviewDialog(QDialog):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.load_styles()  # Add this line before initializing UI
-        self.setWindowTitle("PDF Image Extractor")
-        self.setMinimumWidth(400)
-
-        # Initialize settings
-        self.settings = QSettings("PDFExtractor", "ImageExtractor")
-        self.last_directory = self.settings.value(
-            "last_directory", os.path.expanduser("~")
-        )
-
-        # Create central widget and layout
-        central_widget = QWidget()
-        self.setCentralWidget(central_widget)
-        layout = QVBoxLayout(central_widget)
-
-        # File selection
-        file_layout = QHBoxLayout()
-        self.file_label = QLabel("لم يتم اختيار ملف")
-        self.browse_button = QPushButton("اختر ملف PDF")
-        self.browse_button.clicked.connect(self.browse_file)
-        file_layout.addWidget(self.file_label)
-        file_layout.addWidget(self.browse_button)
-        layout.addLayout(file_layout)
-
-        # Page range selection
-        page_range_layout = QHBoxLayout()
-        self.page_range_check = QCheckBox("تحديد نطاق الصفحات")
-        self.page_range_check.stateChanged.connect(self.toggle_page_range)
-        page_range_layout.addWidget(self.page_range_check)
-
-        self.start_page_label = QLabel("من صفحة:")
-        self.start_page_spin = QSpinBox()
-        self.start_page_spin.setMinimum(1)
-        self.start_page_spin.setEnabled(False)
-
-        self.end_page_label = QLabel("إلى صفحة:")
-        self.end_page_spin = QSpinBox()
-        self.end_page_spin.setMinimum(1)
-        self.end_page_spin.setEnabled(False)
-
-        page_range_layout.addWidget(self.start_page_label)
-        page_range_layout.addWidget(self.start_page_spin)
-        page_range_layout.addWidget(self.end_page_label)
-        page_range_layout.addWidget(self.end_page_spin)
-        page_range_layout.addStretch()
-        layout.addLayout(page_range_layout)
-
-        # Preview button
-        self.preview_button = QPushButton("معاينة")
-        self.preview_button.clicked.connect(self.start_preview)
-        self.preview_button.setEnabled(False)
-        layout.addWidget(self.preview_button)
-
-        # Output type selection
-        output_layout = QHBoxLayout()
-        self.output_group = QButtonGroup()
-
-        self.ppt_radio = QRadioButton("حفظ كعرض تقديمي")
-        self.ppt_radio.setChecked(True)
-        self.images_radio = QRadioButton("حفظ كصور منفصلة")
-
-        self.output_group.addButton(self.ppt_radio)
-        self.output_group.addButton(self.images_radio)
-
-        output_layout.addWidget(self.ppt_radio)
-        output_layout.addWidget(self.images_radio)
-        layout.addLayout(output_layout)
-
-        # Extract button
-        self.extract_button = QPushButton("استخراج الصور")
-        self.extract_button.clicked.connect(self.start_extraction)
-        self.extract_button.setEnabled(False)
-        layout.addWidget(self.extract_button)
-
-        # Progress bar
-        self.progress_bar = QProgressBar()
-        layout.addWidget(self.progress_bar)
-
-        # Status label
-        self.status_label = QLabel()
-        self.status_label.setAlignment(Qt.AlignCenter)
-        layout.addWidget(self.status_label)
-
-        # Add output directory selection
-        output_dir_layout = QHBoxLayout()
-        self.output_dir_label = QLabel("مجلد الحفظ:")
-        self.output_dir_path = QLabel("المستندات")
-        self.output_dir_button = QPushButton("اختر المجلد")
-        self.output_dir_button.clicked.connect(self.select_output_dir)
-
-        output_dir_layout.addWidget(self.output_dir_label)
-        output_dir_layout.addWidget(self.output_dir_path)
-        output_dir_layout.addWidget(self.output_dir_button)
-        layout.addLayout(output_dir_layout)
-
-        # Initialize output directory to Documents folder
-        self.output_dir = os.path.join(os.path.expanduser("~"), "Documents")
-
-        self.pdf_path = None
-        self.extraction_thread = None
-        self.preview_images = []
-        self.inverted_indices = []
+        self.load_styles()
+        self.init_ui()
 
     def load_styles(self):
         """Load and apply QSS styles"""
         try:
-            # Get the absolute path to the QSS file
             current_dir = os.path.dirname(os.path.abspath(__file__))
             style_path = os.path.join(
                 current_dir, "..", "resources", "styles", "main.qss"
@@ -371,149 +283,140 @@ class MainWindow(QMainWindow):
             print(f"Error loading styles: {str(e)}")
 
     def init_ui(self):
-        # Add object names to widgets for specific styling
-        self.browse_button.setObjectName("primaryButton")
-        self.extract_button.setObjectName("actionButton")
-        self.preview_button.setObjectName("secondaryButton")
-        self.progress_bar.setObjectName("progressBar")
+        """Initialize the user interface"""
+        # Set window properties
+        self.setWindowTitle("PDF Tools")
+        self.setGeometry(100, 100, 1200, 800)
+        self.setMinimumSize(800, 600)
 
-        # Add classes to widgets
-        self.file_label.setProperty("class", "fileLabel")
-        self.status_label.setProperty("class", "statusLabel")
+        # Create main widget and layout
+        main_widget = QWidget()
+        main_layout = QHBoxLayout()
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
 
-        # For radio buttons group
-        radio_container = QWidget()
-        radio_container.setObjectName("radioContainer")
-        output_layout.addWidget(radio_container)
+        # Create sidebar
+        sidebar = QWidget()
+        sidebar.setMaximumWidth(250)
+        sidebar.setMinimumWidth(200)
+        sidebar_layout = QVBoxLayout()
+        sidebar_layout.setContentsMargins(10, 10, 10, 10)
 
-    def browse_file(self):
-        file_path, _ = QFileDialog.getOpenFileName(
-            self, "اختر ملف PDF", self.last_directory, "PDF files (*.pdf)"
+        # Add title to sidebar
+        title_label = QLabel("PDF Tools")
+        title_label.setObjectName("sidebarTitle")
+        sidebar_layout.addWidget(title_label)
+
+        # Create module list
+        self.module_list = QListWidget()
+        self.module_list.setObjectName("moduleList")
+
+        # Create stacked widget for module content
+        self.module_stack = QStackedWidget()
+        self.module_stack.setObjectName("moduleStack")
+
+        # Load modules
+        self.modules = [
+            ImageExtractorModule(),
+            BookmarkExtractorModule(),
+            NoteExtractorModule(),
+        ]
+
+        # Add modules to UI
+        for module in self.modules:
+            # Add to sidebar list
+            item = QListWidgetItem(module.get_name())
+            item.setToolTip(module.get_description())
+            self.module_list.addItem(item)
+
+            # Add to stacked widget
+            module_widget = module.get_widget()
+            self.module_stack.addWidget(module_widget)
+
+        # Connect module selection
+        self.module_list.currentRowChanged.connect(self.module_stack.setCurrentIndex)
+
+        # Select first module by default
+        self.module_list.setCurrentRow(0)
+
+        # Add widgets to layouts
+        sidebar_layout.addWidget(self.module_list)
+        sidebar.setLayout(sidebar_layout)
+
+        main_layout.addWidget(sidebar)
+        main_layout.addWidget(self.module_stack)
+
+        # Create menu bar
+        self.create_menu_bar()
+
+        # Set main widget
+        main_widget.setLayout(main_layout)
+        self.setCentralWidget(main_widget)
+
+    def create_menu_bar(self):
+        """Create the application menu bar"""
+        menubar = self.menuBar()
+
+        # File menu
+        file_menu = menubar.addMenu("File")
+
+        # Exit action
+        exit_action = QAction("Exit", self)
+        exit_action.setShortcut("Ctrl+Q")
+        exit_action.triggered.connect(self.close)
+        file_menu.addAction(exit_action)
+
+        # Settings menu
+        settings_menu = menubar.addMenu("Settings")
+
+        # Font action
+        font_action = QAction("Font", self)
+        font_action.triggered.connect(self.change_font)
+        settings_menu.addAction(font_action)
+
+        # Help menu
+        help_menu = menubar.addMenu("Help")
+
+        # About action
+        about_action = QAction("About", self)
+        about_action.triggered.connect(self.show_about)
+        help_menu.addAction(about_action)
+
+    def change_font(self):
+        """Change application font"""
+        font, ok = QFontDialog.getFont(self.font(), self)
+        if ok:
+            self.setFont(font)
+
+    def show_about(self):
+        """Show about dialog"""
+        QMessageBox.about(
+            self,
+            "About PDF Tools",
+            """
+            <h3>PDF Tools</h3>
+            <p>A modern tool for PDF processing.</p>
+            <p>Features:</p>
+            <ul>
+                <li>Image Extraction</li>
+                <li>Bookmark Extraction</li>
+                <li>Note Extraction</li>
+            </ul>
+            """,
         )
 
-        if file_path:
-            # Save the new directory
-            self.last_directory = os.path.dirname(file_path)
-            self.settings.setValue("last_directory", self.last_directory)
-
-            self.pdf_path = file_path
-            self.file_label.setText(os.path.basename(file_path))
-
-            # Update page range spinners with PDF page count
-            try:
-                doc = fitz.open(file_path)
-                page_count = doc.page_count
-                doc.close()
-
-                self.start_page_spin.setMaximum(page_count)
-                self.end_page_spin.setMaximum(page_count)
-                self.end_page_spin.setValue(page_count)
-
-                # Enable preview button
-                self.preview_button.setEnabled(True)
-                self.extract_button.setEnabled(False)
-                self.status_label.setText("اختر نطاق الصفحات ثم اضغط معاينة")
-            except Exception as e:
-                print(f"Error getting page count: {str(e)}")
-
-    def select_output_dir(self):
-        dir_path = QFileDialog.getExistingDirectory(
-            self, "اختر مجلد الحفظ", self.output_dir
-        )
-        if dir_path:
-            self.output_dir = dir_path
-            # Show only the last folder name in the label
-            self.output_dir_path.setText(os.path.basename(dir_path))
-
-    def start_preview(self):
-        self.status_label.setText("جاري استخراج الصور للمعاينة...")
-        self.progress_bar.setValue(0)
-
-        # Get page range
-        start_page = (
-            self.start_page_spin.value() if self.page_range_check.isChecked() else 1
-        )
-        end_page = (
-            self.end_page_spin.value() if self.page_range_check.isChecked() else None
+    def closeEvent(self, event):
+        """Handle application close"""
+        reply = QMessageBox.question(
+            self,
+            "Exit",
+            "Are you sure you want to exit?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
         )
 
-        # Start extraction thread for preview
-        self.extraction_thread = ImageExtractionThread(
-            pdf_path=self.pdf_path,
-            output_dir=self.output_dir,  # Use selected output directory
-            start_page=start_page,
-            end_page=end_page,
-            options={"preview_only": True},
-        )
-        self.extraction_thread.progress.connect(self.update_progress)
-        self.extraction_thread.finished.connect(self.show_preview_dialog)
-        self.extraction_thread.start()
-
-    def show_preview_dialog(self, result):
-        success, message, images = result
-        if success and images:
-            dialog = PreviewDialog(images, self)
-            if dialog.exec_() == QDialog.Accepted:
-                self.preview_images = images
-                self.inverted_indices = dialog.get_inverted_indices()
-                self.extract_button.setEnabled(True)
-                self.status_label.setText("تم تحديد الصور للاستخراج")
-            else:
-                self.status_label.setText("تم إلغاء المعاينة")
-                self.extract_button.setEnabled(False)
+        if reply == QMessageBox.Yes:
+            # Clean up resources if needed
+            event.accept()
         else:
-            self.status_label.setText(message)
-            self.extract_button.setEnabled(False)
-
-    def start_extraction(self):
-        if not self.pdf_path or not self.preview_images:
-            return
-
-        self.extract_button.setEnabled(False)
-        self.progress_bar.setValue(0)
-        self.status_label.setText("جاري استخراج الصور...")
-
-        # Get page range
-        start_page = (
-            self.start_page_spin.value() if self.page_range_check.isChecked() else 1
-        )
-        end_page = (
-            self.end_page_spin.value() if self.page_range_check.isChecked() else None
-        )
-
-        self.extraction_thread = ImageExtractionThread(
-            pdf_path=self.pdf_path,
-            output_dir=self.output_dir,  # Use selected output directory
-            start_page=start_page,
-            end_page=end_page,
-            options={
-                "output_type": "pptx" if self.ppt_radio.isChecked() else "images",
-                "inverted_indices": self.inverted_indices,
-                "preview_images": self.preview_images,
-            },
-        )
-
-        self.extraction_thread.progress.connect(self.update_progress)
-        self.extraction_thread.finished.connect(self.extraction_complete)
-        self.extraction_thread.start()
-
-    def update_progress(self, current, total):
-        percentage = (current / total) * 100
-        self.progress_bar.setValue(int(percentage))
-        self.status_label.setText(f"جاري المعالجة... {current}/{total}")
-
-    def extraction_complete(self, result):
-        success, message, count = result
-        self.extract_button.setEnabled(True)
-
-        if success:
-            self.progress_bar.setValue(100)
-            self.status_label.setText(message)  # Just show the message directly
-        else:
-            self.progress_bar.setValue(0)
-            self.status_label.setText(message)  # Error messages already formatted
-
-    def toggle_page_range(self, state):
-        enabled = bool(state)
-        self.start_page_spin.setEnabled(enabled)
-        self.end_page_spin.setEnabled(enabled)
+            event.ignore()
