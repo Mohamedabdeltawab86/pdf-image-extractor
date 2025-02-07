@@ -1,7 +1,6 @@
 import fitz
 from pathlib import Path
-from ..util.image_handler import save_image
-
+from .image_saver import save_image
 
 def extract_images_from_pdf(pdf_path, output_dir, skip_small=True, min_size=100):
     """

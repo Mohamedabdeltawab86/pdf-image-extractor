@@ -31,14 +31,15 @@ from PyQt5.QtCore import Qt, QThread, pyqtSignal, QDir, QSettings, QFile, QTextS
 from PyQt5.QtGui import QIcon, QFont, QFontDatabase, QPalette, QColor, QPixmap, QImage
 import qtawesome as qta  # For better icons, install with: pip install qtawesome
 from pathlib import Path
-from ..modules.pdf_processor import extract_images_from_pdf
+
+from ..modules.image_extractor.pdf_processor import extract_images_from_pdf
 from ..util.settings import Settings
 from ..util.translations import Translations
-from . import resources_rc  # Change this line
+from . import resources_rc  
+
 from pptx import Presentation
 from pptx.util import Inches
 import fitz
-from ..util.image_handler import save_image, extract_to_ppt, ImageExtractionThread
 import io
 from PIL import Image
 import os
